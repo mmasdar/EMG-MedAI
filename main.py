@@ -49,12 +49,19 @@ class MotorNCSBackend:
                         metadata["name"] = values[0]
                     elif key == "Patient ID" and values:
                         metadata["id"] = values[0]
-                    elif key == "Test Item" and values:
-                        metadata["test_item"] = values[0]
                     elif key == "Trace Label" and len(values) >= 2:
                         metadata["labels"] = values[:2]
 
                 if line.startswith("Trace Data"):
+                    # Check if there is data on the same line
+                    if len(parts) >= 3:
+                        try:
+                            # Assuming format: index; ch1; ch2
+                            a = float(parts[1].replace(",", "."))
+                            b = float(parts[2].replace(",", "."))
+                            data.append([a, b])
+                        except ValueError:
+                            pass
                     start = i + 1
                     break
             
@@ -195,6 +202,9 @@ class FWaveBackend:
                         except: pass
 
                 if line.startswith("Trace Data"):
+                    # Include the first sample if present
+                    if len(parts) > 1:
+                        data_lines.append(parts)
                     start = i + 1
                     break
             
@@ -202,7 +212,7 @@ class FWaveBackend:
                 return None, None
 
             # Read remaining lines
-            data_lines = [l.strip().split(';') for l in lines[start:] if l.strip()]
+            data_lines.extend([l.strip().split(';') for l in lines[start:] if l.strip()])
             if not data_lines:
                 return None, None
             
@@ -300,6 +310,14 @@ class SensoryBackend:
                         except: pass
 
                 if line.startswith("Trace Data"):
+                    # Check if there is data on the same line
+                    if len(parts) >= 2:
+                        try:
+                            # Based on format: ;Value (Column 1)
+                            val = float(parts[1].replace(",", "."))
+                            data.append(val)
+                        except (ValueError, IndexError):
+                            pass
                     start = i + 1
                     break
             
@@ -804,6 +822,8 @@ class NeuroDiagMainWindow(QMainWindow):
             w1_plot = w1 / 5.0
             w2_plot = w2 / 0.5
             
+            # Notebook logic: y = wave_norm + vertical_offset
+            # We add vertical_offset to the entire wave
             y1 = w1_plot + vertical_offset
             y2 = w2_plot + vertical_offset
             
@@ -812,8 +832,8 @@ class NeuroDiagMainWindow(QMainWindow):
             self.canvas.axes.plot(t2, y2, color=color, linewidth=1.2)
             
             # Small vertical tick at cut point for this trace
-            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.5, vertical_offset + 0.5], 
-                                  color='gray', linewidth=0.8, alpha=0.6)
+            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.2, vertical_offset + 0.2], 
+                                  color='gray', linewidth=1, alpha=0.8)
             
             # Trace Label at the end
             self.canvas.axes.text(time[-1] + 1, vertical_offset, f"Tr {i+1}", 
