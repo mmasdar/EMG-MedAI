@@ -217,26 +217,31 @@ class FWaveBackend:
             if not data_lines:
                 return None, None
             
+            # Create List of Numeric Data
+            processed_data = []
+            for row in data_lines:
+                # Column 0 is usually Label/Empty, data starts from Column 1
+                try:
+                    # Clean and convert all elements from index 1 onwards
+                    numeric_row = []
+                    for val in row[1:]:
+                        clean_val = val.strip().replace('"', '').replace(',', '.')
+                        if not clean_val:
+                            numeric_row.append(0.0) # Or skip? Let's use 0.0 or try to parse
+                        else:
+                            numeric_row.append(float(clean_val))
+                    
+                    if numeric_row:
+                        processed_data.append(numeric_row)
+                except (ValueError, IndexError):
+                    continue
+            
+            if not processed_data:
+                return None, None
+
             # Create DataFrame
-            MAX_COLS = len(data_lines[0])
-            # Columns: Index, Tr 1, Tr 2, ... 
-            # We assume column 0 is index/time? Or just data?
-            # Based on previous CSVs, col 0 is often just an index 0,1,2... or time?
-            # User snippet for Motor NCS used parts[1] and parts[2].
-            # Meaning Column 0 was ignored.
-            # We will follow that pattern: Column 0 is index, Traces start at Column 1.
-            
-            cols = ["Index"] + [f"Tr {k}" for k in range(1, MAX_COLS)]
-            
-            df = pd.DataFrame(data_lines, columns=cols)
-            # Convert to float
-            for c in cols:
-                # Replace commas
-                df[c] = df[c].astype(str).str.replace(',', '.')
-                # Coerce to numeric
-                df[c] = pd.to_numeric(df[c], errors='coerce')
-                
-            df = df.dropna()
+            df = pd.DataFrame(processed_data)
+            df.columns = [f"Tr {k+1}" for k in range(df.shape[1])]
             
             # Update dt if available
             self.dt = metadata.get("ms_per_sample", 0.0781)
