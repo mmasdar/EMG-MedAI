@@ -268,16 +268,117 @@ class FWaveBackend:
             "cut_time": self.manual_cut_time
         }
 
+class SensoryBackend:
+    def __init__(self):
+        self.dt = 0.0313  # ms (default for sensory)
+        self.dist_m = 0.14 # default distance 14cm for sural
+
+    def load_data(self, filepath):
+        try:
+            with open(filepath, encoding="latin-1") as f:
+                lines = f.readlines()
+            
+            metadata = {
+                "name": "-", 
+                "id": "-", 
+                "test_item": "Sensory NCS",
+                "ms_per_sample": 0.0313
+            }
+            start = None
+            
+            for i, line in enumerate(lines):
+                parts = line.strip().split(";")
+                if len(parts) >= 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().replace('"', '')
+                    if key == "Patient Name" and val: metadata["name"] = val
+                    elif key == "Patient ID" and val: metadata["id"] = val
+                    elif key == "Test Item" and val: metadata["test_item"] = val
+                    elif key == "ms/Sample" and val: 
+                        try:
+                             metadata["ms_per_sample"] = float(val.replace(',', '.'))
+                        except: pass
+
+                if line.startswith("Trace Data"):
+                    start = i + 1
+                    break
+            
+            if start is None:
+                return None, None
+
+            data = []
+            for line in lines[start:]:
+                parts = line.strip().split(";")
+                if len(parts) < 2:
+                    continue
+                try:
+                    # Based on format: ;Value (Column 1)
+                    val = float(parts[1].replace(",", "."))
+                    data.append(val)
+                except (ValueError, IndexError):
+                    continue
+
+            df = pd.DataFrame(data, columns=["Signal"])
+            self.dt = metadata.get("ms_per_sample", 0.0313)
+            return df, metadata
+        except Exception as e:
+            print(f"Error loading Sensory: {e}")
+            return None, None
+
+    def analyze(self, df):
+        if df is None or df.empty:
+            return None
+            
+        signal = df["Signal"].values
+        N = len(signal)
+        time = np.arange(N) * self.dt
+        
+        # Simple Peak detection
+        p_idx = np.argmax(signal)
+        n_idx = np.argmin(signal)
+        
+        peak_amp = signal[p_idx]
+        trough_amp = signal[n_idx]
+        p2p_amp = abs(peak_amp - trough_amp)
+        
+        # Onset detection (rough approximation: first point > 5% of peak)
+        threshold = peak_amp * 0.1
+        onset_idx = 0
+        for i, v in enumerate(signal):
+            if v > threshold:
+                onset_idx = i
+                break
+        
+        onset_lat = time[onset_idx]
+        peak_lat = time[p_idx]
+        
+        # Velocity
+        latency_sec = onset_lat / 1000.0 if onset_lat > 0 else 1e-9
+        velocity = self.dist_m / latency_sec if latency_sec > 0 else 0
+        
+        return {
+            "time": time,
+            "signal": signal,
+            "p_idx": p_idx,
+            "n_idx": n_idx,
+            "onset_idx": onset_idx,
+            "onset_lat": onset_lat,
+            "peak_lat": peak_lat,
+            "p2p_amp": p2p_amp,
+            "velocity": velocity
+        }
+
 class NeuroDiagMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.motor_backend = MotorNCSBackend()
         self.fwave_backend = FWaveBackend()
+        self.sensory_backend = SensoryBackend()
         
         self.setWindowTitle("NeuroDiag v0.1-alpha")
         self.setGeometry(100, 100, 1280, 720)
         self.current_labels = ["Site 1", "Site 2"] 
-        self.active_mode = "MOTOR_NCS" # or "F_WAVE"
+        self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
 
         # Main Layout
         main_widget = QWidget()
@@ -309,6 +410,8 @@ class NeuroDiagMainWindow(QMainWindow):
             self.switch_view("MOTOR_NCS")
         elif "F-Wave" in item.text():
             self.switch_view("F_WAVE")
+        elif "Sensory NCS" in item.text():
+            self.switch_view("SENSORY_NCS")
             
     def switch_view(self, mode):
         self.active_mode = mode
@@ -318,15 +421,25 @@ class NeuroDiagMainWindow(QMainWindow):
         if mode == "MOTOR_NCS":
             self.title_label.setText("Motor Nerve Conduction")
             self.right_frame.show() 
-            # Reset / Clear input fields if needed
+            self.site1_group.show()
+            self.site2_group.show()
+            self.ncv_label.setText("NCV (m/s):")
         elif mode == "F_WAVE":
             self.title_label.setText("F-Wave Analysis")
-            # F-Wave usually doesn't have the same parameters (Lat/Amp) per trace in the same way.
-            # Hide right panel or show F-Wave specific stats? 
-            # For now, let's keep it or hide it.
-            # User request didn't specify F-wave parameters, just "tab F-wave".
-            # Let's hide the Motor NCS parameter panel to reduce confusion.
             self.right_frame.hide()
+        elif mode == "SENSORY_NCS":
+            self.title_label.setText("Sensory Nerve Conduction")
+            self.right_frame.show()
+            self.site1_group.setTitle("Sensory Parameters")
+            self.site1_group.show()
+            self.site2_group.hide()
+            
+            # Repurpose site1 inputs
+            # Latency (Onset)
+            # Amp (Peak-to-Peak)
+            self.site1_group.layout().itemAtPosition(0, 0).widget().setText("Onset Lat (ms):")
+            self.site1_group.layout().itemAtPosition(1, 0).widget().setText("Amp (uV):")
+            self.ncv_label.setText("SNCV (m/s):")
 
     def create_sidebar(self):
         self.sidebar_frame = QFrame()
@@ -495,6 +608,7 @@ class NeuroDiagMainWindow(QMainWindow):
         
         ncv_label = QLabel("NCV (m/s):")
         ncv_label.setStyleSheet("font-weight: bold;")
+        self.ncv_label = ncv_label # Store reference
         self.ncv_val = QLabel("0.0")
         self.ncv_val.setStyleSheet("font-weight: bold; color: #0d6efd; font-size: 16px;")
         
@@ -512,8 +626,10 @@ class NeuroDiagMainWindow(QMainWindow):
         
         if self.active_mode == "MOTOR_NCS":
              self.process_motor_ncs(filename)
-        else:
+        elif self.active_mode == "F_WAVE":
              self.process_f_wave(filename)
+        elif self.active_mode == "SENSORY_NCS":
+             self.process_sensory_ncs(filename)
 
     def process_motor_ncs(self, filename):
         df, metadata = self.motor_backend.load_data(filename)
@@ -550,6 +666,21 @@ class NeuroDiagMainWindow(QMainWindow):
               return
         
         self.update_ui_fwave(result)
+
+    def process_sensory_ncs(self, filename):
+        df, metadata = self.sensory_backend.load_data(filename)
+        if df is None:
+             QMessageBox.critical(self, "Error", "Failed to load Sensory NCS data")
+             return
+             
+        self.update_patient_info(metadata)
+        
+        result = self.sensory_backend.analyze(df)
+        if result is None:
+              QMessageBox.warning(self, "Warning", "Could not analyze Sensory NCS data")
+              return
+        
+        self.update_ui_sensory(result)
 
     def update_patient_info(self, metadata):
         if metadata:
@@ -712,6 +843,50 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.draw()
         
         self.footer_info_r.setText("Scale: Split Gain (5mV | 500uV)")
+
+    def update_ui_sensory(self, res):
+        # Update Inputs
+        self.s1_lat.setText(f"{res['onset_lat']:.2f}")
+        self.s1_amp.setText(f"{res['p2p_amp']:.1f}")
+        self.ncv_val.setText(f"{res['velocity']:.1f}")
+
+        # Plot
+        self.canvas.axes.clear()
+        
+        # Grid settings
+        self.canvas.axes.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.5)
+        self.canvas.axes.spines['top'].set_visible(False)
+        self.canvas.axes.spines['right'].set_visible(False)
+        self.canvas.axes.spines['left'].set_visible(False) 
+        self.canvas.axes.spines['bottom'].set_visible(False)
+
+        time = res['time']
+        signal = res['signal']
+
+        self.canvas.axes.plot(time, signal, color='#000000', linewidth=1.2)
+        
+        # Peak & Trough markers
+        self.canvas.axes.plot(time[res['p_idx']], signal[res['p_idx']], 'o', color='red', markersize=6)
+        self.canvas.axes.plot(time[res['n_idx']], signal[res['n_idx']], 'o', color='red', markersize=6)
+        
+        # Onset marker (Green)
+        self.canvas.axes.plot(time[res['onset_idx']], signal[res['onset_idx']], 's', color='green', markersize=5)
+
+        # Labels
+        self.canvas.axes.text(time[res['p_idx']], signal[res['p_idx']] + 5, "P", ha='center', color='red', fontweight='bold')
+        self.canvas.axes.text(time[res['n_idx']], signal[res['n_idx']] - 5, "T", ha='center', verticalalignment='top', color='red', fontweight='bold')
+
+        # Setup Axes Limits - Dynamic for Sensory
+        self.canvas.axes.set_xlim(0, time[-1])
+        # Centralized around signal
+        y_max = max(abs(np.max(signal)), abs(np.min(signal))) + 20
+        self.canvas.axes.set_ylim(-y_max, y_max)
+        
+        self.canvas.axes.set_xlabel("Time (ms)")
+        self.canvas.axes.set_ylabel("Amplitude (uV)")
+        
+        self.canvas.draw()
+        self.footer_info_r.setText("Sensitivity: 20 uV/Div (Approx)")
 
     def apply_styles(self):
         # Global Styles
