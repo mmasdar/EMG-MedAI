@@ -5,7 +5,8 @@ import hashlib
 from scipy.signal import find_peaks
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
-                             QFrame, QSplitter, QSizePolicy, QLineEdit, QGroupBox, QGridLayout, QFileDialog, QMessageBox, QDialog)
+                             QFrame, QSplitter, QSizePolicy, QLineEdit, QGroupBox, QGridLayout, 
+                             QFileDialog, QMessageBox, QDialog, QSlider)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -468,6 +469,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.showMaximized()
         self.current_labels = ["Site 1", "Site 2"] 
         self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
+        self.last_fwave_df = None
 
         # Main Layout
         main_widget = QWidget()
@@ -512,16 +514,19 @@ class NeuroDiagMainWindow(QMainWindow):
             self.right_frame.show() 
             self.site1_group.show()
             self.site2_group.show()
+            self.fwave_group.hide()
             self.ncv_label.setText("NCV (m/s):")
         elif mode == "F_WAVE":
             self.title_label.setText("F-Wave Analysis")
             self.right_frame.hide()
+            self.fwave_group.show()
         elif mode == "SENSORY_NCS":
             self.title_label.setText("Sensory Nerve Conduction")
             self.right_frame.show()
             self.site1_group.setTitle("Sensory Parameters")
             self.site1_group.show()
             self.site2_group.hide()
+            self.fwave_group.hide()
             
             # Repurpose site1 inputs
             # Latency (Onset)
@@ -640,9 +645,35 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas = MplCanvas(self, width=5, height=6, dpi=100) # Taller for F-Wave stacks
         layout.addWidget(self.canvas)
         
-        # Initial empty plot
-        self.canvas.axes.text(0.5, 0.5, "Import CSV to View Data", ha='center')
-        self.canvas.draw()
+        # F-Wave Slider (Under the graph)
+        self.fwave_group = QFrame()
+        self.fwave_group.setStyleSheet("background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; margin-top: 5px; padding: 5px;")
+        fwave_layout = QHBoxLayout(self.fwave_group)
+        fwave_layout.setContentsMargins(15, 5, 15, 5)
+        
+        lbl_info = QLabel("🌊 Atur Batas Gain (F-Wave):")
+        lbl_info.setStyleSheet("font-weight: bold; color: #495057;")
+        fwave_layout.addWidget(lbl_info)
+        
+        self.fwave_cut_slider = QSlider(Qt.Horizontal)
+        self.fwave_cut_slider.setMinimum(5)
+        self.fwave_cut_slider.setMaximum(60)
+        self.fwave_cut_slider.setValue(20)
+        self.fwave_cut_slider.setMinimumWidth(400)
+        self.fwave_cut_slider.setStyleSheet("""
+            QSlider::handle:horizontal { background: #0d6efd; width: 18px; border-radius: 9px; }
+        """)
+        self.fwave_cut_slider.valueChanged.connect(self.on_fwave_cut_change)
+        fwave_layout.addWidget(self.fwave_cut_slider)
+        
+        self.fwave_cut_label = QLabel("20.0 ms")
+        self.fwave_cut_label.setFixedWidth(80)
+        self.fwave_cut_label.setAlignment(Qt.AlignCenter)
+        self.fwave_cut_label.setStyleSheet("font-weight: bold; color: #0d6efd; font-size: 14px;")
+        fwave_layout.addWidget(self.fwave_cut_label)
+        
+        layout.addWidget(self.fwave_group)
+        self.fwave_group.hide()
 
         # Footer info - Dynamic maybe?
         self.footer_layout = QHBoxLayout()
@@ -708,6 +739,14 @@ class NeuroDiagMainWindow(QMainWindow):
 
         layout.addStretch()
 
+    def on_fwave_cut_change(self, value):
+        self.fwave_backend.manual_cut_time = float(value)
+        self.fwave_cut_label.setText(f"{value:.1f} ms")
+        if self.last_fwave_df is not None:
+            result = self.fwave_backend.analyze(self.last_fwave_df)
+            if result:
+                self.update_ui_fwave(result)
+
     def import_data(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
         if not filename:
@@ -748,6 +787,7 @@ class NeuroDiagMainWindow(QMainWindow):
              return
              
         self.update_patient_info(metadata)
+        self.last_fwave_df = df # Store for slider interaction
         
         result = self.fwave_backend.analyze(df)
         if result is None:
@@ -1060,11 +1100,16 @@ if __name__ == '__main__':
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    # Show Access Lock first
-    lock = AccessLockDialog()
-    if lock.exec_() == QDialog.Accepted:
-        window = NeuroDiagMainWindow()
-        window.show()
-        sys.exit(app.exec_())
-    else:
-        sys.exit(0)
+    # Show Access Lock (Temporarily disabled for development)
+    # lock = AccessLockDialog()
+    # if lock.exec_() == QDialog.Accepted:
+    #     window = NeuroDiagMainWindow()
+    #     window.showMaximized()
+    #     sys.exit(app.exec_())
+    # else:
+    #     sys.exit(0)
+
+    # Direct launch
+    window = NeuroDiagMainWindow()
+    window.showMaximized()
+    sys.exit(app.exec_())
