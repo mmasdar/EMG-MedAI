@@ -1,10 +1,11 @@
 import sys
 import numpy as np
 import pandas as pd
+import hashlib
 from scipy.signal import find_peaks
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
-                             QFrame, QSplitter, QSizePolicy, QLineEdit, QGroupBox, QGridLayout, QFileDialog, QMessageBox)
+                             QFrame, QSplitter, QSizePolicy, QLineEdit, QGroupBox, QGridLayout, QFileDialog, QMessageBox, QDialog)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -394,6 +395,68 @@ class SensoryBackend:
             "velocity": velocity
         }
 
+class AccessLockDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("NeuroDiag Access Lock")
+        self.setFixedSize(400, 220)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        
+        layout = QVBoxLayout(self)
+        
+        icon_label = QLabel("🔐")
+        icon_label.setFont(QFont("Segoe UI Emoji", 40))
+        icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon_label)
+        
+        self.info_label = QLabel("Masukkan Kunci Akses untuk menjalankan aplikasi:")
+        self.info_label.setStyleSheet("font-weight: bold; color: #212529; font-size: 14px;")
+        self.info_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.info_label)
+        
+        self.key_input = QLineEdit()
+        self.key_input.setEchoMode(QLineEdit.Password)
+        self.key_input.setPlaceholderText("Kunci Akses...")
+        self.key_input.setStyleSheet("padding: 12px; font-size: 14px; border: 2px solid #dee2e6; border-radius: 6px;")
+        layout.addWidget(self.key_input)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_login = QPushButton("Buka Akses")
+        self.btn_login.setStyleSheet("""
+            QPushButton {
+                background-color: #0d6efd; color: white; padding: 10px; font-weight: bold; border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #0b5ed7; }
+        """)
+        self.btn_login.clicked.connect(self.verify_key)
+        
+        self.btn_exit = QPushButton("Keluar")
+        self.btn_exit.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d; color: white; padding: 10px; border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #5a6268; }
+        """)
+        self.btn_exit.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_exit)
+        btn_layout.addWidget(self.btn_login)
+        layout.addLayout(btn_layout)
+        
+        self.master_hash = "92e43ee76839fad67687b3c863e5f9dfe1c6d6d1d9cfee2c5509502ca60db200"
+
+    def verify_key(self):
+        key = self.key_input.text().strip()
+        if not key:
+            return
+            
+        input_hash = hashlib.sha256(key.encode()).hexdigest()
+        if input_hash == self.master_hash:
+            self.accept()
+        else:
+            QMessageBox.critical(self, "Akses Ditolak", "Kunci akses salah! Silakan hubungi pengembang.")
+            self.key_input.clear()
+
 class NeuroDiagMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -727,59 +790,81 @@ class NeuroDiagMainWindow(QMainWindow):
 
         # Plot
         self.canvas.axes.clear()
+        self.canvas.axes.set_facecolor('white')
         
-        # Grid settings matching 5 ms/Div and 5 mV/Div
-        self.canvas.axes.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.5)
-        self.canvas.axes.spines['top'].set_visible(False)
-        self.canvas.axes.spines['right'].set_visible(False)
-        self.canvas.axes.spines['left'].set_visible(False) 
-        self.canvas.axes.spines['bottom'].set_visible(False)
-
-        trace1_mV = res['trace1'] / 1000.0
-        trace2_mV = res['trace2'] / 1000.0
-        offset = 10.0 
-        trace2_shifted = trace2_mV - offset
+        # Grid settings matching 5 ms/Div and 1 Div/Vertical
+        # Horizontal grid every 5 ms
+        self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
+        
+        # Plotting parameters
+        # Notebook logic: wave / 2.0 (2mV/div)
+        # Scale: 1 unit on Y axis = 1 Division
+        mv_per_div = 2.0
+        
+        trace1_div = (res['trace1'] / 1000.0) / mv_per_div
+        trace2_div = (res['trace2'] / 1000.0) / mv_per_div
+        
+        # Separation: Site 1 at Y=0, Site 2 at Y=-5 Divisions
+        offset_div = 5.0 
+        trace1_plot = trace1_div
+        trace2_plot = trace2_div - offset_div
 
         label1 = self.current_labels[0]
         label2 = self.current_labels[1]
 
-        self.canvas.axes.plot(res['time'], trace1_mV, label=label1, color='#000000', linewidth=1.2)
-        self.canvas.axes.plot(res['time'], trace2_shifted, label=label2, color='#000000', linewidth=1.2)
+        # Professional black waveforms
+        self.canvas.axes.plot(res['time'], trace1_plot, label=label1, color='#212529', linewidth=1.2)
+        self.canvas.axes.plot(res['time'], trace2_plot, label=label2, color='#212529', linewidth=1.2)
         
-        self.canvas.axes.text(res['time'][-1], trace1_mV[-1], f" {label1}", verticalalignment='center')
-        self.canvas.axes.text(res['time'][-1], trace2_shifted[-1], f" {label2}", verticalalignment='center')
+        # Trace labels at the end
+        self.canvas.axes.text(res['time'][-1] + 1, 0, f" {label1}", va='center', fontsize=9, fontweight='bold')
+        self.canvas.axes.text(res['time'][-1] + 1, -offset_div, f" {label2}", va='center', fontsize=9, fontweight='bold')
 
+        # Peak Markers
         if res['p1_t'] is not None:
-             p1_val_mV = res['p1_val'] / 1000.0
-             self.canvas.axes.plot(res['p1_t'], p1_val_mV, 'o', color='red', markersize=6)
-             self.canvas.axes.text(res['p1_t'], p1_val_mV + 0.5, "P", ha='center', color='red', fontweight='bold')
+             p1_div = (res['p1_val'] / 1000.0) / mv_per_div
+             self.canvas.axes.plot(res['p1_t'], p1_div, 'o', color='red', markersize=6)
+             self.canvas.axes.text(res['p1_t'], p1_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
              
         if res['p2_t'] is not None:
-             p2_val_mV = res['p2_val'] / 1000.0 - offset
-             self.canvas.axes.plot(res['p2_t'], p2_val_mV, 'o', color='red', markersize=6)
-             self.canvas.axes.text(res['p2_t'], p2_val_mV + 0.5, "P", ha='center', color='red', fontweight='bold')
+             p2_div = ((res['p2_val'] / 1000.0) / mv_per_div) - offset_div
+             self.canvas.axes.plot(res['p2_t'], p2_div, 'o', color='red', markersize=6)
+             self.canvas.axes.text(res['p2_t'], p2_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
 
-        # Baseline markers (Green)
+        # Baseline markers (Green squares)
         z_idx = res['zero_idx']
         t_zero = res['time'][z_idx]
-        b1_mV = res['b1_val'] / 1000.0
-        b2_mV = res['b2_val'] / 1000.0 - offset
+        b1_div = (res['b1_val'] / 1000.0) / mv_per_div
+        b2_div = ((res['b2_val'] / 1000.0) / mv_per_div) - offset_div
 
-        self.canvas.axes.plot(t_zero, b1_mV, 's', color='green', markersize=5)
-        self.canvas.axes.plot(t_zero, b2_mV, 's', color='green', markersize=5)
+        self.canvas.axes.plot(t_zero, b1_div, 's', color='green', markersize=5)
+        self.canvas.axes.plot(t_zero, b2_div, 's', color='green', markersize=5)
+
+        # Scale annotations
+        # Setting Y ticks at every division to show grid lines, but hiding labels
+        self.canvas.axes.set_yticks(np.arange(-offset_div - 2, 2, 1))
+        self.canvas.axes.set_yticklabels([])
+        
+        ann_y = -offset_div - 2.5
+        self.canvas.axes.text(0, ann_y, f"{int(mv_per_div)} mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+        self.canvas.axes.text(res['time'][-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
 
         # Setup Axes Limits
-        self.canvas.axes.set_xlim(0, 50)
-        self.canvas.axes.set_xticks(np.arange(0, 51, 5)) 
-        self.canvas.axes.set_ylim(-25, 15)
-        self.canvas.axes.set_yticks(np.arange(-25, 16, 5)) 
-        self.canvas.axes.set_xticklabels([])
-        self.canvas.axes.set_yticklabels([])
-        self.canvas.axes.set_xlabel("")
+        self.canvas.axes.set_xlim(0, res['time'][-1] + 7)
+        self.canvas.axes.set_xticks(np.arange(0, res['time'][-1] + 5, 5)) 
+        self.canvas.axes.set_ylim(ann_y - 1, 3) # Room for both traces and annotations
+        
+        self.canvas.axes.spines['top'].set_visible(False)
+        self.canvas.axes.spines['right'].set_visible(False)
+        self.canvas.axes.spines['left'].set_visible(False) 
+        self.canvas.axes.spines['bottom'].set_visible(True)
+        self.canvas.axes.spines['bottom'].set_color('gray')
+        
+        self.canvas.axes.set_xlabel("Time (ms)")
         self.canvas.axes.set_ylabel("")
         
         self.canvas.draw()
-        self.footer_info_r.setText("Sensitivity: 2 mV/Div (Approx)")
+        self.footer_info_r.setText(f"Sensitivity: {int(mv_per_div)} mV/Div")
 
     def update_ui_fwave(self, res):
         self.canvas.axes.clear()
@@ -795,8 +880,9 @@ class NeuroDiagMainWindow(QMainWindow):
         
         # Grid and Style setup
         self.canvas.axes.set_facecolor('white')
-        self.canvas.axes.grid(True, which='major', axis='x', linestyle=':', color='lightgray', linewidth=0.5)
-        # Vertical grid every 5 ms
+        self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
+        
+        # Horizontal grid every 5 ms
         self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
         
         self.canvas.axes.spines['top'].set_visible(False)
@@ -854,8 +940,9 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.axvline(x=cut_time, color='gray', linestyle='-', linewidth=1.5, alpha=0.4)
 
         # Scale annotations at the bottom
-        # Clear Y ticks
-        self.canvas.axes.set_yticks([])
+        # Setting Y ticks at every division to show grid lines, but hiding labels
+        self.canvas.axes.set_yticks(np.arange(-1, vertical_offset + 1, 1))
+        self.canvas.axes.set_yticklabels([])
         
         # Calculate annotation Y position (below the first trace)
         ann_y = -1.0 # Adjusted from -3.0
@@ -883,39 +970,62 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.clear()
         
         # Grid settings
-        self.canvas.axes.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.5)
+        self.canvas.axes.set_facecolor('white')
+        self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
+        
         self.canvas.axes.spines['top'].set_visible(False)
         self.canvas.axes.spines['right'].set_visible(False)
         self.canvas.axes.spines['left'].set_visible(False) 
-        self.canvas.axes.spines['bottom'].set_visible(False)
+        self.canvas.axes.spines['bottom'].set_visible(True)
+        self.canvas.axes.spines['bottom'].set_color('gray')
 
         time = res['time']
         signal = res['signal']
+        
+        # Scaling: 20 uV/Div
+        uv_per_div = 20.0
+        signal_div = signal / uv_per_div
 
-        self.canvas.axes.plot(time, signal, color='#000000', linewidth=1.2)
+        self.canvas.axes.plot(time, signal_div, color='#212529', linewidth=1.2)
         
         # Peak & Trough markers
-        self.canvas.axes.plot(time[res['p_idx']], signal[res['p_idx']], 'o', color='red', markersize=6)
-        self.canvas.axes.plot(time[res['n_idx']], signal[res['n_idx']], 'o', color='red', markersize=6)
+        p_div = signal[res['p_idx']] / uv_per_div
+        n_div = signal[res['n_idx']] / uv_per_div
+        o_div = signal[res['onset_idx']] / uv_per_div
+        
+        self.canvas.axes.plot(time[res['p_idx']], p_div, 'o', color='red', markersize=6)
+        self.canvas.axes.plot(time[res['n_idx']], n_div, 'o', color='red', markersize=6)
         
         # Onset marker (Green)
-        self.canvas.axes.plot(time[res['onset_idx']], signal[res['onset_idx']], 's', color='green', markersize=5)
+        self.canvas.axes.plot(time[res['onset_idx']], o_div, 's', color='green', markersize=5)
 
         # Labels
-        self.canvas.axes.text(time[res['p_idx']], signal[res['p_idx']] + 5, "P", ha='center', color='red', fontweight='bold')
-        self.canvas.axes.text(time[res['n_idx']], signal[res['n_idx']] - 5, "T", ha='center', verticalalignment='top', color='red', fontweight='bold')
+        self.canvas.axes.text(time[res['p_idx']], p_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
+        self.canvas.axes.text(time[res['n_idx']], n_div - 0.3, "T", ha='center', va='top', color='red', fontweight='bold', fontsize=8)
 
-        # Setup Axes Limits - Dynamic for Sensory
-        self.canvas.axes.set_xlim(0, time[-1])
-        # Centralized around signal
-        y_max = max(abs(np.max(signal)), abs(np.min(signal))) + 20
-        self.canvas.axes.set_ylim(-y_max, y_max)
+        # Determine range for sensory
+        v_ext = max(abs(np.max(signal_div)), abs(np.min(signal_div)))
+        v_ext = max(v_ext, 2.0) # at least 2 divisions
+        ann_y = -v_ext - 1.5
+        
+        # Scale annotations
+        # Setting Y ticks at every division to show grid lines, but hiding labels
+        self.canvas.axes.set_yticks(np.arange(int(-v_ext - 1), int(v_ext + 2), 1))
+        self.canvas.axes.set_yticklabels([])
+        
+        self.canvas.axes.text(0, ann_y, f"{int(uv_per_div)} \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+        self.canvas.axes.text(time[-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
+
+        # Setup Axes Limits
+        self.canvas.axes.set_xlim(0, time[-1] + 5)
+        self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
+        self.canvas.axes.set_ylim(ann_y - 0.5, v_ext + 1)
         
         self.canvas.axes.set_xlabel("Time (ms)")
-        self.canvas.axes.set_ylabel("Amplitude (uV)")
+        self.canvas.axes.set_ylabel("")
         
         self.canvas.draw()
-        self.footer_info_r.setText("Sensitivity: 20 uV/Div (Approx)")
+        self.footer_info_r.setText(f"Sensitivity: {int(uv_per_div)} \u03bcV/Div")
 
     def apply_styles(self):
         # Global Styles
@@ -950,6 +1060,11 @@ if __name__ == '__main__':
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    window = NeuroDiagMainWindow()
-    window.show()
-    sys.exit(app.exec_())
+    # Show Access Lock first
+    lock = AccessLockDialog()
+    if lock.exec_() == QDialog.Accepted:
+        window = NeuroDiagMainWindow()
+        window.show()
+        sys.exit(app.exec_())
+    else:
+        sys.exit(0)
