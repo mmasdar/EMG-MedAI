@@ -38,6 +38,7 @@ class MotorNCSBackend:
             }
             
             start = None
+            data = []
             for i, line in enumerate(lines):
                 parts = line.strip().split(";")
                 if len(parts) >= 2:
@@ -68,7 +69,6 @@ class MotorNCSBackend:
             if start is None:
                 raise ValueError("Could not find 'Trace Data' section in file.")
 
-            data = []
             for line in lines[start:]:
                 parts = line.strip().split(";")
                 if len(parts) < 3:
@@ -187,6 +187,7 @@ class FWaveBackend:
                 "ms_per_sample": 0.0781
             }
             start = None
+            data_lines = []
             
             for i, line in enumerate(lines):
                 parts = line.strip().split(";")
@@ -295,7 +296,7 @@ class SensoryBackend:
                 "ms_per_sample": 0.0313
             }
             start = None
-            
+            data = []
             for i, line in enumerate(lines):
                 parts = line.strip().split(";")
                 if len(parts) >= 2:
@@ -324,7 +325,6 @@ class SensoryBackend:
             if start is None:
                 return None, None
 
-            data = []
             for line in lines[start:]:
                 parts = line.strip().split(";")
                 if len(parts) < 2:
