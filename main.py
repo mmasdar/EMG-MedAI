@@ -762,32 +762,35 @@ class NeuroDiagMainWindow(QMainWindow):
         cut_time = res['cut_time']
         traces = res['traces']
         
-        # Grid setup
-        self.canvas.axes.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.5)
-        self.canvas.axes.spines['top'].set_visible(False)
-        self.canvas.axes.spines['right'].set_visible(False)
-        self.canvas.axes.spines['left'].set_visible(False) 
-        self.canvas.axes.spines['bottom'].set_visible(False)
-
-        # Plotting parameters
-        vertical_offset = 0
-        spacing = 5.0 # Visual spacing in "Divisions" or "mV" units?
-        # Let's say 1 unit = 1 mV. Spacing = 2-5 mV?
-        # Notebook used manual scaling. 
-        # Logic: 
-        # Portion 1 (< cut_time): / 5 mV (Normal, Gain x1)
-        # Portion 2 (> cut_time): / 0.5 mV (Gain x10)
-        # Then offset each trace.
-        
         if len(time) == 0:
              return
              
         cut_idx = np.argmin(np.abs(time - cut_time))
         
-        for i, trace in enumerate(traces):
-            color = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'][i % 4]
+        # Grid and Style setup
+        self.canvas.axes.set_facecolor('white')
+        self.canvas.axes.grid(True, which='major', axis='x', linestyle=':', color='lightgray', linewidth=0.5)
+        # Vertical grid every 5 ms
+        self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
+        
+        self.canvas.axes.spines['top'].set_visible(False)
+        self.canvas.axes.spines['right'].set_visible(False)
+        self.canvas.axes.spines['left'].set_visible(False) 
+        self.canvas.axes.spines['bottom'].set_visible(True)
+        self.canvas.axes.spines['bottom'].set_color('gray')
+
+        # Plotting parameters
+        vertical_offset = 0
+        spacing = 5.0 # Division spacing
+        
+        # Professional colors
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        
+        for i, trace in enumerate(traces[:10]): # Show top 10 traces
+            color = colors[i % len(colors)]
             
-            # Normalize to mV
+            # Normalize to mV (assuming input is uV)
             trace_mV = trace / 1000.0
             
             # Split
@@ -796,53 +799,50 @@ class NeuroDiagMainWindow(QMainWindow):
             t2 = time[cut_idx:]
             w2 = trace_mV[cut_idx:]
             
-            # Apply Visual Gain
-            # Graph Unit = 1 mV (Conceptually)
-            # Part 1: Plot as is (Assuming we want 1 unit = 1mV? Or 1 unit = 1 Div?)
-            # Notebook says: wave1_norm = wave1 / 5.0. This makes 5mV = 1.0 Unit (1 Div).
-            # wave2_norm = wave2 / 0.5. This makes 0.5mV = 1.0 Unit (1 Div).
-            
-            # So let's plot in "Division Units".
+            # Apply Visual Gain (Normalization)
+            # Notebook: wave1 / 5.0 (5mV/div), wave2 / 0.5 (500uV/div)
             w1_plot = w1 / 5.0
             w2_plot = w2 / 0.5
             
-            w1_shifted = w1_plot + vertical_offset
-            w2_shifted = w2_plot + vertical_offset
+            y1 = w1_plot + vertical_offset
+            y2 = w2_plot + vertical_offset
             
-            self.canvas.axes.plot(t1, w1_shifted, color=color, linewidth=1)
-            self.canvas.axes.plot(t2, w2_shifted, color=color, linewidth=1)
+            # Plot segments
+            self.canvas.axes.plot(t1, y1, color=color, linewidth=1.2)
+            self.canvas.axes.plot(t2, y2, color=color, linewidth=1.2)
             
-            # Divider line at cut point for each trace? Optional.
+            # Small vertical tick at cut point for this trace
+            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.5, vertical_offset + 0.5], 
+                                  color='gray', linewidth=0.8, alpha=0.6)
             
-            # Label
-            self.canvas.axes.text(time[-1]+1, w2_shifted[-1], f"Tr {i+1}", va='center', fontsize=8)
+            # Trace Label at the end
+            self.canvas.axes.text(time[-1] + 1, vertical_offset, f"Tr {i+1}", 
+                                  va='center', ha='left', fontsize=9, color=color, fontweight='bold')
 
-            vertical_offset -= 3 # Stack downwards
+            vertical_offset += spacing # Stack upwards (increasing Y)
             
-        # Draw vertical separator
-        self.canvas.axes.axvline(x=cut_time, color='gray', linestyle='-', linewidth=1, alpha=0.5)
+        # Draw main vertical separator at cut_time
+        self.canvas.axes.axvline(x=cut_time, color='gray', linestyle='-', linewidth=1.5, alpha=0.4)
 
-        # Add scale annotations
-        # x=0 -> 5 mV/Div
-        # x=cut_time -> 500 uV/Div
-        self.canvas.axes.text(0, vertical_offset-1, "5 mV/Div", va='top', ha='left')
-        self.canvas.axes.text(cut_time+2, vertical_offset-1, "500 uV/Div", va='top', ha='left')
+        # Scale annotations at the bottom
+        # Clear Y ticks
+        self.canvas.axes.set_yticks([])
         
+        # Calculate annotation Y position (below the first trace)
+        ann_y = -3.0
+        self.canvas.axes.text(0, ann_y, "5 mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+        self.canvas.axes.text(cut_time + 2, ann_y, "500 \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+        self.canvas.axes.text(time[-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
+
         # Axis Limits
-        self.canvas.axes.set_xlim(0, time[-1] + 5)
-        # Y axis dynamic based on number of traces
-        self.canvas.axes.set_ylim(vertical_offset - 2, 5) # Enough space
-        
-        self.canvas.axes.set_xticks(np.arange(0, time[-1]+1, 5))
-        self.canvas.axes.set_xticklabels([f"{int(x)}" for x in np.arange(0, time[-1]+1, 5)])
-        self.canvas.axes.set_yticks([]) # Hide Y ticks as they are arbitrary units now
+        self.canvas.axes.set_xlim(0, time[-1] + 8)
+        self.canvas.axes.set_ylim(ann_y - 2, vertical_offset)
         
         self.canvas.axes.set_xlabel("Time (ms)")
-        self.canvas.axes.set_ylabel("") # Custom gains
+        self.canvas.axes.set_ylabel("")
         
         self.canvas.draw()
-        
-        self.footer_info_r.setText("Scale: Split Gain (5mV | 500uV)")
+        self.footer_info_r.setText("Scale: Split Gain (Upward Stacked)")
 
     def update_ui_sensory(self, res):
         # Update Inputs
