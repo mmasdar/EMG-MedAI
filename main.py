@@ -18,7 +18,10 @@ class MplCanvas(FigureCanvas):
         self.axes.spines['top'].set_visible(False)
         self.axes.spines['right'].set_visible(False)
         self.axes.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+        self.fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.08)
         super(MplCanvas, self).__init__(self.fig)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.updateGeometry()
 
 class MotorNCSBackend:
     def __init__(self):
@@ -399,7 +402,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.sensory_backend = SensoryBackend()
         
         self.setWindowTitle("NeuroDiag v0.1-alpha")
-        self.setGeometry(100, 100, 1280, 720)
+        self.showMaximized()
         self.current_labels = ["Site 1", "Site 2"] 
         self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
 
