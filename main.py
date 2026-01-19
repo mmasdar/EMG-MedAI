@@ -804,7 +804,7 @@ class NeuroDiagMainWindow(QMainWindow):
 
         # Plotting parameters
         vertical_offset = 0
-        spacing = 5.0 # Division spacing
+        spacing = 1.5 # Reduced from 5.0 to make signals look relatively larger
         
         # Professional colors
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
@@ -837,7 +837,8 @@ class NeuroDiagMainWindow(QMainWindow):
             self.canvas.axes.plot(t2, y2, color=color, linewidth=1.2)
             
             # Small vertical tick at cut point for this trace
-            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.2, vertical_offset + 0.2], 
+            # Adjusted range to match smaller spacing
+            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.1, vertical_offset + 0.1], 
                                   color='gray', linewidth=1, alpha=0.8)
             
             # Trace Label at the end
@@ -854,14 +855,14 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.set_yticks([])
         
         # Calculate annotation Y position (below the first trace)
-        ann_y = -3.0
+        ann_y = -1.0 # Adjusted from -3.0
         self.canvas.axes.text(0, ann_y, "5 mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
-        self.canvas.axes.text(cut_time + 2, ann_y, "500 \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+        self.canvas.axes.text(cut_time + 1, ann_y, "500 \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
         self.canvas.axes.text(time[-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
 
         # Axis Limits
         self.canvas.axes.set_xlim(0, time[-1] + 8)
-        self.canvas.axes.set_ylim(ann_y - 2, vertical_offset)
+        self.canvas.axes.set_ylim(ann_y - 0.5, vertical_offset)
         
         self.canvas.axes.set_xlabel("Time (ms)")
         self.canvas.axes.set_ylabel("")
