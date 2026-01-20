@@ -476,6 +476,13 @@ class NeuroDiagMainWindow(QMainWindow):
         self.motor_files = []
         self.fwave_files = []
         self.sensory_files = []
+        
+        # Plotting objects cache for real-time updates
+        self.fwave_lines_w1 = []
+        self.fwave_lines_w2 = []
+        self.fwave_vline = None
+        self.fwave_labels = []
+        self.fwave_scale_labels = {}
 
         # Main Layout
         main_widget = QWidget()
@@ -567,75 +574,159 @@ class NeuroDiagMainWindow(QMainWindow):
 
     def create_sidebar(self):
         self.sidebar_frame = QFrame()
-        self.sidebar_frame.setFixedWidth(250)
-        self.sidebar_frame.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #dee2e6;")
+        self.sidebar_frame.setFixedWidth(280)
+        self.sidebar_frame.setStyleSheet("background-color: white; border-right: 1px solid #e9ecef;")
         layout = QVBoxLayout(self.sidebar_frame)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
 
-        # User Profile
-        user_box = QFrame()
-        user_box.setStyleSheet("background-color: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px;")
-        user_box_layout = QVBoxLayout(user_box)
-        user_box_layout.setContentsMargins(10, 10, 10, 10)
-        user_box_layout.setSpacing(5)
+        # 1. Logo Section
+        logo_layout = QHBoxLayout()
+        logo_icon = QLabel("🧠") # Placeholder for icon
+        logo_icon.setFixedSize(48, 48)
+        logo_icon.setAlignment(Qt.AlignCenter)
+        logo_icon.setStyleSheet("""
+            background-color: #2979ff; 
+            border-radius: 8px; 
+            color: white; 
+            font-size: 24px;
+        """)
+        logo_layout.addWidget(logo_icon)
         
-        self.name_label = QLabel("Pasien: -")
-        self.name_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529;")
-        self.name_label.setWordWrap(True)
-        user_box_layout.addWidget(self.name_label)
+        title_vbox = QVBoxLayout()
+        title_vbox.setSpacing(0)
+        app_name = QLabel("NeuroDiag <span style='color: #2979ff;'>v1.0-alpha</span>")
+        app_name.setStyleSheet("font-weight: 800; font-size: 16px; color: #333;")
         
+        app_sub_name = QLabel("DIAGNOSTIC INTERFACE")
+        app_sub_name.setStyleSheet("color: #999; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        
+        title_vbox.addWidget(app_name)
+        title_vbox.addWidget(app_sub_name)
+        logo_layout.addLayout(title_vbox)
+        logo_layout.addStretch()
+        layout.addLayout(logo_layout)
+        
+        layout.addSpacing(15)
+
+        # 2. Premium Patient Card
+        self.patient_card = QFrame()
+        self.patient_card.setMinimumHeight(140)
+        self.patient_card.setObjectName("PatientCard")
+        self.patient_card.setStyleSheet("""
+            #PatientCard {
+                background-color: #f8fbff; 
+                border: 1px solid #e1effe; 
+                border-radius: 16px; 
+            }
+        """)
+        
+        # Add Subtle Shadow
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        self.patient_card.setGraphicsEffect(shadow)
+        
+        card_layout = QVBoxLayout(self.patient_card)
+        card_layout.setContentsMargins(15, 15, 15, 15)
+        card_layout.setSpacing(10)
+        
+        user_info_row = QHBoxLayout()
+        # Avatar Circle
+        self.avatar_label = QLabel("??")
+        self.avatar_label.setFixedSize(44, 44)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet("""
+            background-color: #d1e6ff; 
+            color: #2979ff; 
+            border-radius: 22px; 
+            font-weight: 800; 
+            font-size: 15px;
+        """)
+        user_info_row.addWidget(self.avatar_label)
+        
+        user_text_vbox = QVBoxLayout()
+        user_text_vbox.setSpacing(2)
+        self.name_label = QLabel("Belum Ada Pasien")
+        self.name_label.setStyleSheet("font-weight: 700; font-size: 14px; color: #1a202c;")
         self.id_label = QLabel("ID: -")
-        self.id_label.setStyleSheet("color: #6c757d; font-size: 10px;")
-        self.id_label.setWordWrap(True)
-        user_box_layout.addWidget(self.id_label)
+        self.id_label.setStyleSheet("color: #2979ff; font-size: 11px; font-weight: bold;")
+        user_text_vbox.addWidget(self.name_label)
+        user_text_vbox.addWidget(self.id_label)
+        user_info_row.addLayout(user_text_vbox)
+        user_info_row.addStretch()
         
-        layout.addWidget(user_box)
+        card_layout.addLayout(user_info_row)
         
-        edit_link = QLabel("✏️ Edit Data Pasien")
-        edit_link.setStyleSheet("color: #0d6efd; font-size: 11px;")
-        edit_link.setCursor(Qt.PointingHandCursor)
-        layout.addWidget(edit_link)
+        # Edit Button
+        self.btn_edit_patient = QPushButton(" 📘  Edit Data Pasien")
+        self.btn_edit_patient.setCursor(Qt.PointingHandCursor)
+        self.btn_edit_patient.setStyleSheet("""
+            QPushButton {
+                background-color: white; 
+                border: 1px solid #e1effe; 
+                border-radius: 8px; 
+                padding: 10px; 
+                color: #2979ff; 
+                font-weight: 800;
+                font-size: 12px;
+            }
+            QPushButton:hover { 
+                background-color: #f1f7ff; 
+                border: 1px solid #2979ff;
+            }
+        """)
+        card_layout.addWidget(self.btn_edit_patient)
+        
+        layout.addWidget(self.patient_card)
 
-        # Divider
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color: #dee2e6;")
-        layout.addWidget(line)
-
-        # Review Section Header
+        # 3. NCS Examination Section
         header_ncs = QLabel("PEMERIKSAAN NCS")
-        header_ncs.setStyleSheet("color: #6c757d; font-size: 11px; font-weight: bold; margin-top: 10px;")
+        header_ncs.setStyleSheet("color: #a0aec0; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; margin-top: 25px; margin-left: 5px;")
         layout.addWidget(header_ncs)
 
-        # Menu Items
+        # 4. Styled Menu List
         self.menu_list = QListWidget()
-        self.menu_list.addItem("⚡ Motor NCS")
-        self.menu_list.addItem("🌊 F-Wave Analysis")
-        self.menu_list.addItem("👆 Sensory NCS")
-        self.menu_list.setCurrentRow(0)
-        self.menu_list.setMaximumHeight(110)
+        self.menu_list.setObjectName("SidebarMenu")
         self.menu_list.setStyleSheet("""
-            QListWidget { border: none; background: transparent; font-size: 13px; }
-            QListWidget::item { padding: 8px; border-radius: 4px; }
-            QListWidget::item:selected { background-color: #e7f1ff; color: #0d6efd; font-weight: bold; }
-            QListWidget::item:hover { background-color: #e9ecef; }
+            #SidebarMenu { border: none; background: transparent; outline: none; }
+            #SidebarMenu::item {
+                border-radius: 12px;
+                padding: 14px 12px;
+                margin-bottom: 6px;
+                color: #4a5568;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            #SidebarMenu::item:hover { background-color: #f7fafc; }
+            #SidebarMenu::item:selected {
+                background-color: #ebf4ff;
+                color: #2979ff;
+                border-left: 5px solid #2979ff;
+            }
         """)
+        
+        # Add items with space for icons
+        self.menu_list.addItem("   ⚡   Motor NCS")
+        self.menu_list.addItem("   〰️   F-Wave Analysis")
+        self.menu_list.addItem("   �   Sensory NCS")
+        self.menu_list.setCurrentRow(0)
+        self.menu_list.setMinimumHeight(180)
         self.menu_list.currentRowChanged.connect(self.on_menu_change)
         layout.addWidget(self.menu_list)
 
-        # Results Section
+        # 5. Results Section (Re-added)
         header_res = QLabel("HASIL")
-        header_res.setStyleSheet("color: #6c757d; font-size: 11px; font-weight: bold; margin-top: 10px;")
+        header_res.setStyleSheet("color: #a0aec0; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; margin-top: 20px; margin-left: 5px;")
         layout.addWidget(header_res)
         
         self.res_list = QListWidget()
-        self.res_list.addItem("➕ Diagnosis Otomatis")
-        self.res_list.setStyleSheet("""
-             QListWidget { border: none; background: transparent; font-size: 13px; }
-             QListWidget::item { padding: 8px; border-radius: 4px; }
-             QListWidget::item:hover { background-color: #e9ecef; }
-        """)
+        self.res_list.addItem("   📊   Diagnosis Otomatis")
+        self.res_list.addItem("   📝   Clinical Summary")
+        self.res_list.setStyleSheet(self.menu_list.styleSheet())
+        self.res_list.setMaximumHeight(120)
         layout.addWidget(self.res_list)
 
         layout.addStretch()
@@ -697,21 +788,25 @@ class NeuroDiagMainWindow(QMainWindow):
         label_row.addWidget(self.fwave_cut_label)
         fwave_layout.addLayout(label_row)
         
-        # Slider row with min/max labels
+        # Slider row with matching plot margins (left=0.05, right=0.95)
         slider_row = QHBoxLayout()
-        slider_row.setContentsMargins(15, 5, 15, 5)
+        slider_row.setContentsMargins(0, 5, 0, 5)
+        slider_row.setSpacing(0)
         
-        # Min label
-        min_label = QLabel("0 ms")
-        min_label.setStyleSheet("color: #6c757d; font-size: 11px;")
-        slider_row.addWidget(min_label)
+        # Left space (5% of canvas width) - Using fixed width based on typical window size or spacer
+        slider_row.addSpacing(10) # Minimal padding
+        
+        # Left Margin Spacer to match MplCanvas (left=0.05)
+        self.left_spacer = QWidget()
+        self.left_spacer.setFixedWidth(50) # Initial guess, will be refined if needed
+        slider_row.addWidget(self.left_spacer)
         
         self.fwave_cut_slider = QSlider(Qt.Horizontal)
-        self.fwave_cut_slider.setMinimum(5)
-        self.fwave_cut_slider.setMaximum(80)
-        self.fwave_cut_slider.setValue(20)
+        self.fwave_cut_slider.setMinimum(50) # Use 0.1ms precision (50 = 5.0ms)
+        self.fwave_cut_slider.setMaximum(800) # (800 = 80.0ms)
+        self.fwave_cut_slider.setValue(200)
         self.fwave_cut_slider.setTickPosition(QSlider.TicksBelow)
-        self.fwave_cut_slider.setTickInterval(10)
+        self.fwave_cut_slider.setTickInterval(100)
         self.fwave_cut_slider.setStyleSheet("""
             QSlider::groove:horizontal { 
                 background: #dee2e6; height: 8px; border-radius: 4px; 
@@ -725,15 +820,14 @@ class NeuroDiagMainWindow(QMainWindow):
                 background: #0b5ed7;
             }
             QSlider::sub-page:horizontal { background: #0d6efd; border-radius: 4px; }
-            QSlider::tick-mark:horizontal { background: #adb5bd; width: 1px; height: 5px; }
         """)
         self.fwave_cut_slider.valueChanged.connect(self.on_fwave_cut_change)
-        slider_row.addWidget(self.fwave_cut_slider, stretch=1)
+        slider_row.addWidget(self.fwave_cut_slider, stretch=100)
         
-        # Max label
-        max_label = QLabel("80 ms")
-        max_label.setStyleSheet("color: #6c757d; font-size: 11px;")
-        slider_row.addWidget(max_label)
+        # Right Margin Spacer to match MplCanvas (right=0.95)
+        self.right_spacer = QWidget()
+        self.right_spacer.setFixedWidth(80) # Larger because of labels
+        slider_row.addWidget(self.right_spacer)
         
         fwave_layout.addLayout(slider_row)
         
@@ -965,12 +1059,14 @@ class NeuroDiagMainWindow(QMainWindow):
         return lbl
 
     def on_fwave_cut_change(self, value):
-        self.fwave_backend.manual_cut_time = float(value)
-        self.fwave_cut_label.setText(f"{value:.1f} ms")
+        # Value is in 0.1ms units
+        ms_val = value / 10.0
+        self.fwave_backend.manual_cut_time = ms_val
+        self.fwave_cut_label.setText(f"{ms_val:.1f} ms")
         if self.last_fwave_df is not None:
             result = self.fwave_backend.analyze(self.last_fwave_df)
             if result:
-                self.update_ui_fwave(result)
+                self.update_ui_fwave(result, fast_update=True)
 
     def open_patient_folder(self):
         import os
@@ -1062,6 +1158,11 @@ class NeuroDiagMainWindow(QMainWindow):
               QMessageBox.warning(self, "Warning", "Could not analyze F-Wave data")
               return
         
+        # Update slider range based on duration (time[-1])
+        # Convert to units of 0.1ms
+        max_ms = result['time'][-1]
+        self.fwave_cut_slider.setMaximum(int(max_ms * 10))
+        
         self.update_ui_fwave(result)
 
     def process_sensory_ncs(self, filename):
@@ -1082,7 +1183,12 @@ class NeuroDiagMainWindow(QMainWindow):
     def update_patient_info(self, metadata):
         if metadata:
             if "name" in metadata:
-                self.name_label.setText(f"Pasien: {metadata['name']}")
+                name = metadata['name']
+                self.name_label.setText(name)
+                # Update initials for avatar
+                initials = "".join([n[0] for n in name.split()[:2]]).upper()
+                if not initials: initials = "P"
+                self.avatar_label.setText(initials)
             if "id" in metadata:
                 self.id_label.setText(f"ID: {metadata['id']}")
             if "test_item" in metadata:
@@ -1189,9 +1295,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.draw()
         self.footer_info_r.setText(f"Sensitivity: {int(mv_per_div)} mV/Div")
 
-    def update_ui_fwave(self, res):
-        self.canvas.axes.clear()
-        
+    def update_ui_fwave(self, res, fast_update=False):
         time = res['time']
         cut_time = res['cut_time']
         traces = res['traces']
@@ -1201,86 +1305,103 @@ class NeuroDiagMainWindow(QMainWindow):
              
         cut_idx = np.argmin(np.abs(time - cut_time))
         
-        # Grid and Style setup
-        self.canvas.axes.set_facecolor('white')
-        self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
-        
-        # Horizontal grid every 5 ms
-        self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
-        
-        self.canvas.axes.spines['top'].set_visible(False)
-        self.canvas.axes.spines['right'].set_visible(False)
-        self.canvas.axes.spines['left'].set_visible(False) 
-        self.canvas.axes.spines['bottom'].set_visible(True)
-        self.canvas.axes.spines['bottom'].set_color('gray')
-
-        # Plotting parameters
-        vertical_offset = 0
-        spacing = 1.5 # Reduced from 5.0 to make signals look relatively larger
-        
-        # Professional colors
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-        
-        for i, trace in enumerate(traces[:10]): # Show top 10 traces
-            color = colors[i % len(colors)]
+        if not fast_update or not hasattr(self, 'fwave_lines_w1') or not self.fwave_lines_w1:
+            self.canvas.axes.clear()
+            self.fwave_lines_w1 = []
+            self.fwave_lines_w2 = []
+            self.fwave_labels = []
+            self.fwave_scale_labels = {}
             
-            # Normalize to mV (assuming input is uV)
+            # Grid and Style setup
+            self.canvas.axes.set_facecolor('white')
+            self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
+            
+            # Horizontal grid every 5 ms
+            self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
+            
+            self.canvas.axes.spines['top'].set_visible(False)
+            self.canvas.axes.spines['right'].set_visible(False)
+            self.canvas.axes.spines['left'].set_visible(False) 
+            self.canvas.axes.spines['bottom'].set_visible(True)
+            self.canvas.axes.spines['bottom'].set_color('gray')
+    
+            # Plotting parameters
+            vertical_offset = 0
+            spacing = 1.5 
+            
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                      '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+            
+            for i, trace in enumerate(traces[:10]): 
+                color = colors[i % len(colors)]
+                
+                # Plot segments (Initial setup)
+                l1, = self.canvas.axes.plot([], [], color=color, linewidth=1.2)
+                l2, = self.canvas.axes.plot([], [], color=color, linewidth=1.2)
+                self.fwave_lines_w1.append(l1)
+                self.fwave_lines_w2.append(l2)
+                
+                # Trace Label
+                lbl = self.canvas.axes.text(time[-1] + 1, vertical_offset, f"Tr {i+1}", 
+                                      va='center', ha='left', fontsize=9, color=color, fontweight='bold')
+                self.fwave_labels.append(lbl)
+                vertical_offset += spacing
+            
+            # Main vertical separator
+            self.fwave_vline = self.canvas.axes.axvline(x=cut_time, color='#adb5bd', linestyle='-', linewidth=2, alpha=0.6)
+    
+            # Scale annotations
+            self.canvas.axes.set_yticks(np.arange(-1, vertical_offset + 1, 1))
+            self.canvas.axes.set_yticklabels([])
+            
+            ann_y = -1.0 
+            self.fwave_scale_labels['left'] = self.canvas.axes.text(0, ann_y, "5 mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+            self.fwave_scale_labels['mid'] = self.canvas.axes.text(cut_time + 1, ann_y, "500 \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
+            self.fwave_scale_labels['right'] = self.canvas.axes.text(time[-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
+    
+            # Axis Limits
+            self.canvas.axes.set_xlim(0, time[-1] + 8)
+            self.canvas.axes.set_ylim(ann_y - 0.5, vertical_offset)
+            self.canvas.axes.set_xlabel("Time (ms)")
+            self.canvas.axes.set_ylabel("") # Ensure ylabel is set to empty string
+            
+        # Common Update Logic (Fast and Initial)
+        vertical_offset = 0
+        spacing = 1.5
+        for i, trace in enumerate(traces[:10]):
             trace_mV = trace / 1000.0
             
-            # Split
+            # Split with overlap at cut_idx to ensure seamless connection
             t1 = time[:cut_idx+1]
-            w1 = trace_mV[:cut_idx+1]
+            w1 = (trace_mV[:cut_idx+1] / 5.0) + vertical_offset
+            
             t2 = time[cut_idx:]
-            w2 = trace_mV[cut_idx:]
+            w2 = (trace_mV[cut_idx:] / 0.5) + vertical_offset
             
-            # Apply Visual Gain (Normalization)
-            # Notebook: wave1 / 5.0 (5mV/div), wave2 / 0.5 (500uV/div)
-            w1_plot = w1 / 5.0
-            w2_plot = w2 / 0.5
+            self.fwave_lines_w1[i].set_data(t1, w1)
+            self.fwave_lines_w2[i].set_data(t2, w2)
+            vertical_offset += spacing
             
-            # Notebook logic: y = wave_norm + vertical_offset
-            # We add vertical_offset to the entire wave
-            y1 = w1_plot + vertical_offset
-            y2 = w2_plot + vertical_offset
-            
-            # Plot segments
-            self.canvas.axes.plot(t1, y1, color=color, linewidth=1.2)
-            self.canvas.axes.plot(t2, y2, color=color, linewidth=1.2)
-            
-            # Small vertical tick at cut point for this trace
-            # Adjusted range to match smaller spacing
-            self.canvas.axes.plot([cut_time, cut_time], [vertical_offset - 0.1, vertical_offset + 0.1], 
-                                  color='gray', linewidth=1, alpha=0.8)
-            
-            # Trace Label at the end
-            self.canvas.axes.text(time[-1] + 1, vertical_offset, f"Tr {i+1}", 
-                                  va='center', ha='left', fontsize=9, color=color, fontweight='bold')
-
-            vertical_offset += spacing # Stack upwards (increasing Y)
-            
-        # Draw main vertical separator at cut_time
-        self.canvas.axes.axvline(x=cut_time, color='gray', linestyle='-', linewidth=1.5, alpha=0.4)
-
-        # Scale annotations at the bottom
-        # Setting Y ticks at every division to show grid lines, but hiding labels
-        self.canvas.axes.set_yticks(np.arange(-1, vertical_offset + 1, 1))
-        self.canvas.axes.set_yticklabels([])
+        # Update vertical line
+        self.fwave_vline.set_xdata([cut_time, cut_time])
         
-        # Calculate annotation Y position (below the first trace)
-        ann_y = -1.0 # Adjusted from -3.0
-        self.canvas.axes.text(0, ann_y, "5 mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
-        self.canvas.axes.text(cut_time + 1, ann_y, "500 \u03bcV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
-        self.canvas.axes.text(time[-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
-
-        # Axis Limits
-        self.canvas.axes.set_xlim(0, time[-1] + 8)
-        self.canvas.axes.set_ylim(ann_y - 0.5, vertical_offset)
+        # Update "500 uV" label position
+        if 'mid' in self.fwave_scale_labels:
+            self.fwave_scale_labels['mid'].set_position((cut_time + 1, -1.0))
+            
+        # Final render call
+        if fast_update:
+            self.canvas.draw_idle()
+        else:
+            self.canvas.draw()
+            
+            # Synchronize Slider UI margins
+            canvas_width = self.canvas.width()
+            left_px = int(canvas_width * 0.05)
+            right_px = int(canvas_width * 0.12)
+            self.left_spacer.setFixedWidth(left_px + 8)
+            self.right_spacer.setFixedWidth(right_px + 15)
         
-        self.canvas.axes.set_xlabel("Time (ms)")
-        self.canvas.axes.set_ylabel("")
-        
-        self.canvas.draw()
         self.footer_info_r.setText("Scale: Split Gain (Upward Stacked)")
 
     def update_ui_sensory(self, res):
