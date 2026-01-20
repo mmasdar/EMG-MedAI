@@ -470,6 +470,12 @@ class NeuroDiagMainWindow(QMainWindow):
         self.current_labels = ["Site 1", "Site 2"] 
         self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
         self.last_fwave_df = None
+        
+        # File storage for folder import
+        self.patient_folder = None
+        self.motor_files = []
+        self.fwave_files = []
+        self.sensory_files = []
 
         # Main Layout
         main_widget = QWidget()
@@ -491,9 +497,6 @@ class NeuroDiagMainWindow(QMainWindow):
         main_layout.addWidget(self.right_frame)
 
         self.apply_styles()
-        
-        # Connect signals
-        self.menu_list.currentRowChanged.connect(self.on_menu_change)
 
     def on_menu_change(self, row):
         item = self.menu_list.item(row)
@@ -509,31 +512,58 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.clear()
         self.canvas.draw()
         
+        # Update file list in right panel based on mode
+        self.update_file_list()
+        
         if mode == "MOTOR_NCS":
             self.title_label.setText("Motor Nerve Conduction")
             self.right_frame.show() 
-            self.site1_group.show()
-            self.site2_group.show()
+            self.motor_summary_group.show()
+            self.cv_group.show()
             self.fwave_group.hide()
-            self.ncv_label.setText("NCV (m/s):")
+            self.site1_label.setText("Distal")
+            self.site2_label.setText("Proximal")
         elif mode == "F_WAVE":
             self.title_label.setText("F-Wave Analysis")
-            self.right_frame.hide()
+            self.right_frame.show()
+            self.motor_summary_group.hide()
+            self.cv_group.hide()
             self.fwave_group.show()
         elif mode == "SENSORY_NCS":
             self.title_label.setText("Sensory Nerve Conduction")
             self.right_frame.show()
-            self.site1_group.setTitle("Sensory Parameters")
-            self.site1_group.show()
-            self.site2_group.hide()
+            self.motor_summary_group.show()
+            self.cv_group.show()
             self.fwave_group.hide()
-            
-            # Repurpose site1 inputs
-            # Latency (Onset)
-            # Amp (Peak-to-Peak)
-            self.site1_group.layout().itemAtPosition(0, 0).widget().setText("Onset Lat (ms):")
-            self.site1_group.layout().itemAtPosition(1, 0).widget().setText("Amp (uV):")
-            self.ncv_label.setText("SNCV (m/s):")
+            self.site1_label.setText("Sensory")
+            self.site2_label.setText("-")
+
+
+    def update_file_list(self):
+        """Update the file list in right panel based on current mode"""
+        self.data_file_list.clear()
+        import os
+        
+        if self.active_mode == "MOTOR_NCS":
+            for f in self.motor_files:
+                self.data_file_list.addItem(f"⚡ {os.path.basename(f)}")
+        elif self.active_mode == "F_WAVE":
+            for f in self.fwave_files:
+                self.data_file_list.addItem(f"🌊 {os.path.basename(f)}")
+        elif self.active_mode == "SENSORY_NCS":
+            for f in self.sensory_files:
+                self.data_file_list.addItem(f"👆 {os.path.basename(f)}")
+
+    def on_file_selected(self, item):
+        """Handle file selection from right panel list"""
+        idx = self.data_file_list.row(item)
+        
+        if self.active_mode == "MOTOR_NCS" and 0 <= idx < len(self.motor_files):
+            self.process_motor_ncs(self.motor_files[idx])
+        elif self.active_mode == "F_WAVE" and 0 <= idx < len(self.fwave_files):
+            self.process_f_wave(self.fwave_files[idx])
+        elif self.active_mode == "SENSORY_NCS" and 0 <= idx < len(self.sensory_files):
+            self.process_sensory_ncs(self.sensory_files[idx])
 
     def create_sidebar(self):
         self.sidebar_frame = QFrame()
@@ -544,24 +574,26 @@ class NeuroDiagMainWindow(QMainWindow):
         layout.setSpacing(15)
 
         # User Profile
-        user_layout = QHBoxLayout()
-        icon_label = QLabel("👤") 
-        icon_label.setStyleSheet("font-size: 24px; color: #0d6efd; border: 1px solid #dee2e6; border-radius: 20px; padding: 5px;")
+        user_box = QFrame()
+        user_box.setStyleSheet("background-color: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px;")
+        user_box_layout = QVBoxLayout(user_box)
+        user_box_layout.setContentsMargins(10, 10, 10, 10)
+        user_box_layout.setSpacing(5)
         
-        user_info = QVBoxLayout()
         self.name_label = QLabel("Pasien: -")
-        self.name_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.name_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529;")
+        self.name_label.setWordWrap(True)
+        user_box_layout.addWidget(self.name_label)
+        
         self.id_label = QLabel("ID: -")
-        self.id_label.setStyleSheet("color: #6c757d; font-size: 11px;")
-        user_info.addWidget(self.name_label)
-        user_info.addWidget(self.id_label)
+        self.id_label.setStyleSheet("color: #6c757d; font-size: 10px;")
+        self.id_label.setWordWrap(True)
+        user_box_layout.addWidget(self.id_label)
         
-        user_layout.addWidget(icon_label)
-        user_layout.addLayout(user_info)
-        layout.addLayout(user_layout)
+        layout.addWidget(user_box)
         
-        edit_link = QLabel("Edit Data Pasien")
-        edit_link.setStyleSheet("color: #0d6efd; font-size: 12px; text-decoration: none;")
+        edit_link = QLabel("✏️ Edit Data Pasien")
+        edit_link.setStyleSheet("color: #0d6efd; font-size: 11px;")
         edit_link.setCursor(Qt.PointingHandCursor)
         layout.addWidget(edit_link)
 
@@ -579,15 +611,17 @@ class NeuroDiagMainWindow(QMainWindow):
         # Menu Items
         self.menu_list = QListWidget()
         self.menu_list.addItem("⚡ Motor NCS")
-        self.menu_list.addItem("🌊 F-Wave Analysis") # Moved up or reordered? User said "tab F-wave"
+        self.menu_list.addItem("🌊 F-Wave Analysis")
         self.menu_list.addItem("👆 Sensory NCS")
         self.menu_list.setCurrentRow(0)
+        self.menu_list.setMaximumHeight(110)
         self.menu_list.setStyleSheet("""
             QListWidget { border: none; background: transparent; font-size: 13px; }
             QListWidget::item { padding: 8px; border-radius: 4px; }
             QListWidget::item:selected { background-color: #e7f1ff; color: #0d6efd; font-weight: bold; }
             QListWidget::item:hover { background-color: #e9ecef; }
         """)
+        self.menu_list.currentRowChanged.connect(self.on_menu_change)
         layout.addWidget(self.menu_list)
 
         # Results Section
@@ -618,14 +652,14 @@ class NeuroDiagMainWindow(QMainWindow):
         self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529;")
         
         # Action Buttons
-        btn_import = QPushButton("📂 Import CSV")
+        btn_import = QPushButton("📂 Open Folder")
         btn_import.setStyleSheet("""
             QPushButton {
                 background-color: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px;
             }
             QPushButton:hover { background-color: #5a6268; }
         """)
-        btn_import.clicked.connect(self.import_data)
+        btn_import.clicked.connect(self.open_patient_folder)
 
         btn_stimulate = QPushButton("▶ Jalankan Stimulasi")
         btn_stimulate.setStyleSheet("""
@@ -645,32 +679,63 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas = MplCanvas(self, width=5, height=6, dpi=100) # Taller for F-Wave stacks
         layout.addWidget(self.canvas)
         
-        # F-Wave Slider (Under the graph)
+        # F-Wave Slider (Under the graph, aligned with x-axis)
         self.fwave_group = QFrame()
-        self.fwave_group.setStyleSheet("background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; margin-top: 5px; padding: 5px;")
-        fwave_layout = QHBoxLayout(self.fwave_group)
-        fwave_layout.setContentsMargins(15, 5, 15, 5)
+        self.fwave_group.setStyleSheet("background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; margin-top: 5px;")
+        fwave_layout = QVBoxLayout(self.fwave_group)
+        fwave_layout.setContentsMargins(0, 8, 0, 8)
         
+        # Label row
+        label_row = QHBoxLayout()
+        label_row.setContentsMargins(15, 0, 15, 0)
         lbl_info = QLabel("🌊 Atur Batas Gain (F-Wave):")
         lbl_info.setStyleSheet("font-weight: bold; color: #495057;")
-        fwave_layout.addWidget(lbl_info)
+        label_row.addWidget(lbl_info)
+        label_row.addStretch()
+        self.fwave_cut_label = QLabel("20 ms")
+        self.fwave_cut_label.setStyleSheet("font-weight: bold; color: #0d6efd; font-size: 16px; background-color: #e7f1ff; padding: 4px 12px; border-radius: 4px;")
+        label_row.addWidget(self.fwave_cut_label)
+        fwave_layout.addLayout(label_row)
+        
+        # Slider row with min/max labels
+        slider_row = QHBoxLayout()
+        slider_row.setContentsMargins(15, 5, 15, 5)
+        
+        # Min label
+        min_label = QLabel("0 ms")
+        min_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        slider_row.addWidget(min_label)
         
         self.fwave_cut_slider = QSlider(Qt.Horizontal)
         self.fwave_cut_slider.setMinimum(5)
-        self.fwave_cut_slider.setMaximum(60)
+        self.fwave_cut_slider.setMaximum(80)
         self.fwave_cut_slider.setValue(20)
-        self.fwave_cut_slider.setMinimumWidth(400)
+        self.fwave_cut_slider.setTickPosition(QSlider.TicksBelow)
+        self.fwave_cut_slider.setTickInterval(10)
         self.fwave_cut_slider.setStyleSheet("""
-            QSlider::handle:horizontal { background: #0d6efd; width: 18px; border-radius: 9px; }
+            QSlider::groove:horizontal { 
+                background: #dee2e6; height: 8px; border-radius: 4px; 
+            }
+            QSlider::handle:horizontal { 
+                background: #0d6efd; width: 20px; height: 20px; 
+                margin: -6px 0; border-radius: 10px;
+                border: 2px solid white;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #0b5ed7;
+            }
+            QSlider::sub-page:horizontal { background: #0d6efd; border-radius: 4px; }
+            QSlider::tick-mark:horizontal { background: #adb5bd; width: 1px; height: 5px; }
         """)
         self.fwave_cut_slider.valueChanged.connect(self.on_fwave_cut_change)
-        fwave_layout.addWidget(self.fwave_cut_slider)
+        slider_row.addWidget(self.fwave_cut_slider, stretch=1)
         
-        self.fwave_cut_label = QLabel("20.0 ms")
-        self.fwave_cut_label.setFixedWidth(80)
-        self.fwave_cut_label.setAlignment(Qt.AlignCenter)
-        self.fwave_cut_label.setStyleSheet("font-weight: bold; color: #0d6efd; font-size: 14px;")
-        fwave_layout.addWidget(self.fwave_cut_label)
+        # Max label
+        max_label = QLabel("80 ms")
+        max_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        slider_row.addWidget(max_label)
+        
+        fwave_layout.addLayout(slider_row)
         
         layout.addWidget(self.fwave_group)
         self.fwave_group.hide()
@@ -690,54 +755,214 @@ class NeuroDiagMainWindow(QMainWindow):
         self.right_frame.setStyleSheet("background-color: #f8f9fa; border-left: 1px solid #dee2e6;")
         layout = QVBoxLayout(self.right_frame)
         layout.setContentsMargins(15, 20, 15, 20)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
         
-        layout.addWidget(QLabel("Parameter Pengukuran"))
-
-        # Site 1 Box
-        self.site1_group = QGroupBox("Site 1: Ankle (Distal)")
-        site1_layout = QGridLayout()
-        site1_layout.addWidget(QLabel("Latency (ms):"), 0, 0)
-        self.s1_lat = QLineEdit("0.0")
-        site1_layout.addWidget(self.s1_lat, 0, 1)
-        site1_layout.addWidget(QLabel("Amp (mV):"), 1, 0)
-        self.s1_amp = QLineEdit("0.0")
-        site1_layout.addWidget(self.s1_amp, 1, 1)
-        self.site1_group.setLayout(site1_layout)
-        layout.addWidget(self.site1_group)
-
-        # Site 2 Box
-        self.site2_group = QGroupBox("Site 2: Knee (Proximal)")
-        self.site2_group.setStyleSheet("QGroupBox { color: #dc3545; font-weight: bold; }")
-        site2_layout = QGridLayout()
-        site2_layout.addWidget(QLabel("Latency (ms):"), 0, 0)
-        self.s2_lat = QLineEdit("0.0")
-        site2_layout.addWidget(self.s2_lat, 0, 1)
-        site2_layout.addWidget(QLabel("Amp (mV):"), 1, 0)
-        self.s2_amp = QLineEdit("0.0")
-        site2_layout.addWidget(self.s2_amp, 1, 1)
-        self.site2_group.setLayout(site2_layout)
-        layout.addWidget(self.site2_group)
-
-        # Calculation Box
-        calc_group = QGroupBox("Conduction Velocity")
-        calc_layout = QGridLayout()
-        calc_layout.addWidget(QLabel("Jarak (mm):"), 0, 0)
-        self.dist_input = QLineEdit("80") 
-        calc_layout.addWidget(self.dist_input, 0, 1)
+        # File Selection Section (at top)
+        file_header = QLabel("📁 Pilih File Data")
+        file_header.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529;")
+        layout.addWidget(file_header)
         
-        ncv_label = QLabel("NCV (m/s):")
-        ncv_label.setStyleSheet("font-weight: bold;")
-        self.ncv_label = ncv_label # Store reference
+        self.data_file_list = QListWidget()
+        self.data_file_list.setMaximumHeight(180)
+        self.data_file_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.data_file_list.setStyleSheet("""
+            QListWidget { border: 1px solid #dee2e6; background: white; font-size: 12px; border-radius: 4px; }
+            QListWidget::item { padding: 6px 10px; }
+            QListWidget::item:selected { background-color: #e7f1ff; color: #0d6efd; font-weight: bold; }
+            QListWidget::item:hover { background-color: #f8f9fa; }
+        """)
+        self.data_file_list.itemClicked.connect(self.on_file_selected)
+        layout.addWidget(self.data_file_list)
+        
+        # Divider
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("color: #dee2e6;")
+        layout.addWidget(line)
+        
+        # Parameter Section Header
+        param_header = QLabel("📊 MOTOR SUMMARY TABLE")
+        param_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #6c757d; margin-top: 5px;")
+        layout.addWidget(param_header)
+
+        # Motor Summary Table Container
+        self.motor_summary_group = QFrame()
+        self.motor_summary_group.setStyleSheet("background-color: white; border: 1px solid #dee2e6; border-radius: 8px;")
+        table_layout = QGridLayout(self.motor_summary_group)
+        table_layout.setContentsMargins(10, 10, 10, 10)
+        table_layout.setSpacing(8)
+        
+        # Table Headers
+        header_style = "font-weight: bold; font-size: 10px; color: #495057;"
+        table_layout.addWidget(self._create_header("Stim Site", header_style), 0, 0)
+        table_layout.addWidget(self._create_header("Lat (ms)", header_style), 0, 1)
+        table_layout.addWidget(self._create_header("Amp (mV)", header_style), 0, 2)
+        
+        # Divider line
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background-color: #dee2e6;")
+        table_layout.addWidget(line, 1, 0, 1, 3)
+        
+        # Site 1 Row (Distal)
+        self.site1_label = QLabel("Distal")
+        self.site1_label.setStyleSheet("font-size: 12px; color: #212529;")
+        table_layout.addWidget(self.site1_label, 2, 0)
+        
+        self.s1_lat = QLabel("0.00")
+        self.s1_lat.setStyleSheet("font-size: 12px; font-weight: bold; color: #212529;")
+        table_layout.addWidget(self.s1_lat, 2, 1)
+        
+        self.s1_amp = QLabel("0.00")
+        self.s1_amp.setStyleSheet("font-size: 12px; font-weight: bold; color: #212529;")
+        table_layout.addWidget(self.s1_amp, 2, 2)
+        
+        # Site 2 Row (Proximal)
+        self.site2_label = QLabel("Proximal")
+        self.site2_label.setStyleSheet("font-size: 12px; color: #212529;")
+        table_layout.addWidget(self.site2_label, 3, 0)
+        
+        self.s2_lat = QLabel("0.00")
+        self.s2_lat.setStyleSheet("font-size: 12px; font-weight: bold; color: #212529;")
+        table_layout.addWidget(self.s2_lat, 3, 1)
+        
+        self.s2_amp = QLabel("0.00")
+        self.s2_amp.setStyleSheet("font-size: 12px; font-weight: bold; color: #212529;")
+        table_layout.addWidget(self.s2_amp, 3, 2)
+        
+        layout.addWidget(self.motor_summary_group)
+        
+        # Keep references for hiding (for other modes)
+        self.site1_group = self.motor_summary_group
+        self.site2_group = QFrame()  # Dummy for compatibility
+        self.site2_group.hide()
+
+        # Conduction Velocity Analysis Section - Clean Modern Design
+        self.cv_group = QFrame()
+        self.cv_group.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2196F3, stop:1 #42A5F5);
+                border-radius: 12px; margin-top: 10px;
+            }
+        """)
+        cv_main_layout = QVBoxLayout(self.cv_group)
+        cv_main_layout.setContentsMargins(16, 14, 16, 14)
+        cv_main_layout.setSpacing(12)
+        
+        # Header with icon
+        header_row = QHBoxLayout()
+        header_icon = QLabel("⚡")
+        header_icon.setStyleSheet("font-size: 14px; background: transparent;")
+        header_row.addWidget(header_icon)
+        cv_header = QLabel("VELOCITY ANALYSIS")
+        cv_header.setStyleSheet("font-weight: bold; font-size: 12px; color: white; background: transparent; letter-spacing: 1px;")
+        header_row.addWidget(cv_header)
+        header_row.addStretch()
+        cv_main_layout.addLayout(header_row)
+        
+        # Values Grid - Delta and Dist side by side
+        values_row = QHBoxLayout()
+        values_row.setSpacing(15)
+        
+        # Delta box
+        delta_box = QVBoxLayout()
+        delta_box.setSpacing(4)
+        delta_label = QLabel("Delta (ms)")
+        delta_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
+        delta_box.addWidget(delta_label)
+        
+        delta_val_row = QHBoxLayout()
+        delta_val_row.setSpacing(0)
+        delta_open = QLabel("(")
+        delta_open.setStyleSheet("font-size: 24px; color: rgba(255,255,255,0.5); background: transparent;")
+        delta_val_row.addWidget(delta_open)
+        self.delta_val = QLabel("0.00")
+        self.delta_val.setStyleSheet("font-size: 24px; font-weight: bold; color: white; background: transparent;")
+        delta_val_row.addWidget(self.delta_val)
+        delta_val_row.addStretch()
+        delta_box.addLayout(delta_val_row)
+        values_row.addLayout(delta_box)
+        
+        # Dist box
+        dist_box = QVBoxLayout()
+        dist_box.setSpacing(4)
+        dist_label = QLabel("Dist (mm)")
+        dist_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
+        dist_box.addWidget(dist_label)
+        
+        dist_val_row = QHBoxLayout()
+        dist_val_row.setSpacing(0)
+        dist_open = QLabel("(")
+        dist_open.setStyleSheet("font-size: 24px; color: rgba(255,255,255,0.5); background: transparent;")
+        dist_val_row.addWidget(dist_open)
+        self.dist_input = QLabel("0")
+        self.dist_input.setStyleSheet("font-size: 24px; font-weight: bold; color: white; background: transparent;")
+        dist_val_row.addWidget(self.dist_input)
+        dist_val_row.addStretch()
+        dist_box.addLayout(dist_val_row)
+        values_row.addLayout(dist_box)
+        
+        values_row.addStretch()
+        cv_main_layout.addLayout(values_row)
+        
+        # Separator
+        separator = QFrame()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background-color: rgba(255,255,255,0.2);")
+        cv_main_layout.addWidget(separator)
+        
+        # Result Section
+        result_col = QVBoxLayout()
+        result_col.setSpacing(4)
+        result_label = QLabel("Velocity Result")
+        result_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
+        result_col.addWidget(result_label)
+        
+        # Main velocity value with status
+        result_row = QHBoxLayout()
+        result_row.setSpacing(8)
+        
+        vel_val_row = QHBoxLayout()
+        vel_val_row.setSpacing(0)
+        vel_open = QLabel("(")
+        vel_open.setStyleSheet("font-size: 32px; color: rgba(255,255,255,0.5); background: transparent;")
+        vel_val_row.addWidget(vel_open)
         self.ncv_val = QLabel("0.0")
-        self.ncv_val.setStyleSheet("font-weight: bold; color: #0d6efd; font-size: 16px;")
+        self.ncv_val.setStyleSheet("font-size: 32px; font-weight: bold; color: white; background: transparent;")
+        vel_val_row.addWidget(self.ncv_val)
         
-        calc_layout.addWidget(ncv_label, 1, 0)
-        calc_layout.addWidget(self.ncv_val, 1, 1)
-        calc_group.setLayout(calc_layout)
-        layout.addWidget(calc_group)
+        vel_unit = QLabel("M/S")
+        vel_unit.setStyleSheet("font-size: 14px; font-weight: bold; color: rgba(255,255,255,0.8); background: transparent; margin-left: 4px;")
+        vel_val_row.addWidget(vel_unit, alignment=Qt.AlignBottom)
+        result_row.addLayout(vel_val_row)
+        
+        result_row.addStretch()
+        
+        # Status badge
+        self.ncv_status = QLabel("NORMAL")
+        self.ncv_status.setStyleSheet("""
+            font-size: 10px; font-weight: bold; color: white; 
+            background-color: #4CAF50;
+            padding: 6px 12px; border-radius: 4px;
+        """)
+        result_row.addWidget(self.ncv_status, alignment=Qt.AlignVCenter)
+        
+        result_col.addLayout(result_row)
+        cv_main_layout.addLayout(result_col)
+        
+        layout.addWidget(self.cv_group)
+        
+        # ncv_label reference for compatibility
+        self.ncv_label = QLabel("NCV (m/s):")
+
 
         layout.addStretch()
+
+    def _create_header(self, text, style):
+        lbl = QLabel(text)
+        lbl.setStyleSheet(style)
+        lbl.setAlignment(Qt.AlignCenter)
+        return lbl
 
     def on_fwave_cut_change(self, value):
         self.fwave_backend.manual_cut_time = float(value)
@@ -747,17 +972,60 @@ class NeuroDiagMainWindow(QMainWindow):
             if result:
                 self.update_ui_fwave(result)
 
-    def import_data(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
-        if not filename:
-             return
+    def open_patient_folder(self):
+        import os
+        folder = QFileDialog.getExistingDirectory(self, "Select Patient Folder")
+        if not folder:
+            return
         
-        if self.active_mode == "MOTOR_NCS":
-             self.process_motor_ncs(filename)
-        elif self.active_mode == "F_WAVE":
-             self.process_f_wave(filename)
-        elif self.active_mode == "SENSORY_NCS":
-             self.process_sensory_ncs(filename)
+        self.patient_folder = folder
+        patient_name = os.path.basename(folder)
+        self.name_label.setText(f"Pasien: {patient_name}")
+        
+        # Clear previous data
+        self.motor_files = []
+        self.fwave_files = []
+        self.sensory_files = []
+        
+        # Scan folder structure
+        fwave_folder = os.path.join(folder, "f wave")
+        ncv_folder = os.path.join(folder, "ncv")
+        
+        # F-Wave files
+        if os.path.exists(fwave_folder):
+            for f in sorted(os.listdir(fwave_folder)):
+                if f.endswith('.csv'):
+                    filepath = os.path.join(fwave_folder, f)
+                    self.fwave_files.append(filepath)
+        
+        # NCV files (1-8 motor, 9-14 sensory)
+        if os.path.exists(ncv_folder):
+            for f in sorted(os.listdir(ncv_folder)):
+                if f.endswith('.csv'):
+                    filepath = os.path.join(ncv_folder, f)
+                    # Extract number from filename
+                    try:
+                        num = int(os.path.splitext(f)[0])
+                        if 1 <= num <= 8:
+                            self.motor_files.append(filepath)
+                        elif 9 <= num <= 14:
+                            self.sensory_files.append(filepath)
+                    except ValueError:
+                        pass
+        
+        # Update file list in right panel
+        self.update_file_list()
+        
+        # Auto-load first file if available in current mode
+        if self.active_mode == "MOTOR_NCS" and self.motor_files:
+            self.process_motor_ncs(self.motor_files[0])
+            self.data_file_list.setCurrentRow(0)
+        elif self.active_mode == "F_WAVE" and self.fwave_files:
+            self.process_f_wave(self.fwave_files[0])
+            self.data_file_list.setCurrentRow(0)
+        elif self.active_mode == "SENSORY_NCS" and self.sensory_files:
+            self.process_sensory_ncs(self.sensory_files[0])
+            self.data_file_list.setCurrentRow(0)
 
     def process_motor_ncs(self, filename):
         df, metadata = self.motor_backend.load_data(filename)
@@ -770,8 +1038,8 @@ class NeuroDiagMainWindow(QMainWindow):
         # Labels update
         if metadata and "labels" in metadata and len(metadata["labels"]) >= 2:
             self.current_labels = metadata["labels"]
-            self.site1_group.setTitle(f"Site 1: {self.current_labels[0]}")
-            self.site2_group.setTitle(f"Site 2: {self.current_labels[1]}")
+            self.site1_label.setText(self.current_labels[0])
+            self.site2_label.setText(self.current_labels[1])
 
         result = self.motor_backend.analyze(df)
         if result is None:
@@ -820,13 +1088,28 @@ class NeuroDiagMainWindow(QMainWindow):
             if "test_item" in metadata:
                 self.title_label.setText(metadata['test_item'])
 
+
     def update_ui_motor(self, res):
-        # Update Inputs
+        # Update Motor Summary Table
         self.s1_lat.setText(f"{res['p1_t']:.2f}")
         self.s1_amp.setText(f"{res['amp1_mV']:.2f}")
         self.s2_lat.setText(f"{res['p2_t']:.2f}")
         self.s2_amp.setText(f"{res['amp2_mV']:.2f}")
+        
+        # Update Conduction Velocity Analysis
+        delta = res['p2_t'] - res['p1_t']
+        self.delta_val.setText(f"{delta:.2f}")
+        self.dist_input.setText(f"{res.get('distance_mm', 250)}")
         self.ncv_val.setText(f"{res['velocity']:.1f}")
+        
+        # Update status badge with solid colors
+        if res['velocity'] >= 50:
+            self.ncv_status.setText("NORMAL")
+            self.ncv_status.setStyleSheet("font-size: 10px; font-weight: bold; color: white; background-color: #4CAF50; padding: 6px 12px; border-radius: 4px;")
+        else:
+            self.ncv_status.setText("ABNORMAL")
+            self.ncv_status.setStyleSheet("font-size: 10px; font-weight: bold; color: white; background-color: #E53935; padding: 6px 12px; border-radius: 4px;")
+
 
         # Plot
         self.canvas.axes.clear()
