@@ -55,6 +55,12 @@ class MotorNCSBackend:
                         metadata["name"] = values[0]
                     elif key == "Patient ID" and values:
                         metadata["id"] = values[0]
+                    elif key == "Test Item" and values:
+                        metadata["test_item"] = values[0]
+                    elif "Sensitivity" in key and values:
+                        try:
+                            metadata["sensitivity"] = float(values[0].replace(",", "."))
+                        except: pass
                     elif key == "Trace Label" and len(values) >= 2:
                         metadata["labels"] = values[:2]
 
@@ -102,83 +108,80 @@ class MotorNCSBackend:
         N = len(df)
         time = np.array([i * self.dt for i in range(N)])
         
-        # Cut initial artifact
-        start_index = 10
-        if N <= start_index:
-            return None
-
+        # Display all data starting from the first sample
+        start_index = 0
+        
         # Slices
         time_cut = time[start_index:]
         # Use simple positional indexing instead of names
         trace1_raw = df.iloc[start_index:, 0].values
         trace2_raw = df.iloc[start_index:, 1].values
 
-        # Auto-invert
-        trace1 = self.auto_invert(trace1_raw)
-        trace2 = self.auto_invert(trace2_raw)
+        # Motor NCS Polaritas: Flip BOTH traces (masing-masing gelombang) to ensure they match reference phase
+        # User confirmed that even with auto_invert, the phase was reversed (Up-Down instead of Down-Up)
+        trace1 = self.auto_invert(trace1_raw) * -1
+        trace2 = self.auto_invert(trace2_raw) * -1
 
-        # Peak detection
-        peaks1, _ = find_peaks(trace1, distance=50)
-        peaks2, _ = find_peaks(trace2, distance=50)
-
-        if len(peaks1) == 0 or len(peaks2) == 0:
-            return {
-                "time": time_cut,
-                "trace1": trace1,
-                "trace2": trace2,
-                "p1_idx": None,
-                "p2_idx": None,
-                "latency": 0,
-                "amp1": 0,
-                "amp2": 0,
-                "velocity": 0
-            }
-
-        # Taking the highest peak for simplicity (as per notebook logic)
-        p1_local_idx = peaks1[np.argmax(trace1[peaks1])]
-        p2_local_idx = peaks2[np.argmax(trace2[peaks2])]
-
-        # Calculate metrics
-        # Time values
-        t1 = time_cut[p1_local_idx]
-        t2 = time_cut[p2_local_idx]
-        
-        latency_ms = abs(t2 - t1)
-        latency_sec = latency_ms / 1000.0 if latency_ms != 0 else 1e-9
-
-        # Baseline at t = 0 (using time_cut if 0 is within range, else first available)
+        # Automated Peak Detection Disabled as per user request
         zero_idx = np.argmin(np.abs(time_cut - 0))
         b1_val = trace1[zero_idx]
         b2_val = trace2[zero_idx]
-
-        # Amplitudes (uV -> mV ?) Note notebook says / 1e3. 
-        # Usually data is in uV, user wants mV.
-        amp1_mV = trace1[p1_local_idx] / 1000.0
-        amp2_mV = trace2[p2_local_idx] / 1000.0
-
-        velocity = self.dist_m / latency_sec if latency_sec > 0 else 0
 
         return {
             "time": time_cut,
             "trace1": trace1,
             "trace2": trace2,
-            "p1_t": t1, # Time at peak 1
-            "p1_val": trace1[p1_local_idx],
-            "p2_t": t2, # Time at peak 2
-            "p2_val": trace2[p2_local_idx],
+            "p1_t": None, 
+            "p1_val": 0,
+            "p2_t": None, 
+            "p2_val": 0,
             "zero_idx": zero_idx,
             "b1_val": b1_val,
             "b2_val": b2_val,
-            "latency_ms": latency_ms,
-            "amp1_mV": amp1_mV,
-            "amp2_mV": amp2_mV,
-            "velocity": velocity
+            "latency_ms": 0,
+            "amp1_mV": 0,
+            "amp2_mV": 0,
+            "velocity": 0
         }
 
 class FWaveBackend:
     def __init__(self):
         self.dt = 0.0781 # ms
-        self.manual_cut_time = 20.0 # ms
+        self.manual_cut_time = 20.0 # ms (Fixed at 20 as requested)
+
+    def _detect_cut_point(self, traces):
+        """Logic to automatically determine the M-Wave/F-Wave transition"""
+        if not traces:
+            return 20.0
+            
+        # 1. Take mean absolute signal across all traces to get a reliable envelope
+        try:
+            stacked = np.abs(np.array(traces))
+            mean_env = np.mean(stacked, axis=0)
+            
+            # 2. Find global max (M-wave)
+            max_val = np.max(mean_env)
+            if max_val == 0: return 20.0
+            max_idx = np.argmax(mean_env)
+            
+            # 3. Search for the "quiet zone" after the M-wave peak
+            # We look for a point after the peak where the signal drops below 
+            # 5% of max and stays low for at least 3ms (window size)
+            threshold = 0.05 * max_val
+            window_size = int(3.0 / self.dt) # number of samples in 3ms
+            
+            detected_idx = -1
+            for i in range(max_idx, len(mean_env) - window_size):
+                if np.all(mean_env[i:i+window_size] < threshold):
+                    detected_idx = i
+                    break
+            
+            if detected_idx != -1:
+                return float(detected_idx * self.dt)
+            return 25.0
+        except Exception as e:
+            print(f"Error in auto cut point detection: {e}")
+            return 20.0
 
     def load_data(self, filepath):
         try:
@@ -277,11 +280,13 @@ class FWaveBackend:
             # Data from CSV
             signal = df[col].values
             
-            # User Logic: tr_current = tr_data[:N] * -1
-            # Unconditional inversion
+            # F-Wave Polaritas: Flip each of the 10 traces vertically
             signal_inverted = signal * -1
-            
             processed_traces.append(signal_inverted)
+
+        # Use manual cut time (default 20.0) without hard-overwriting
+        if self.manual_cut_time is None:
+            self.manual_cut_time = 20.0
 
         return {
             "time": time,
@@ -315,6 +320,10 @@ class SensoryBackend:
                     if key == "Patient Name" and val: metadata["name"] = val
                     elif key == "Patient ID" and val: metadata["id"] = val
                     elif key == "Test Item" and val: metadata["test_item"] = val
+                    elif "Sensitivity" in key and val:
+                        try:
+                             metadata["sensitivity"] = float(val.replace(',', '.'))
+                        except: pass
                     elif key == "ms/Sample" and val: 
                         try:
                              metadata["ms_per_sample"] = float(val.replace(',', '.'))
@@ -361,39 +370,17 @@ class SensoryBackend:
         N = len(signal)
         time = np.arange(N) * self.dt
         
-        # Simple Peak detection
-        p_idx = np.argmax(signal)
-        n_idx = np.argmin(signal)
-        
-        peak_amp = signal[p_idx]
-        trough_amp = signal[n_idx]
-        p2p_amp = abs(peak_amp - trough_amp)
-        
-        # Onset detection (rough approximation: first point > 5% of peak)
-        threshold = peak_amp * 0.1
-        onset_idx = 0
-        for i, v in enumerate(signal):
-            if v > threshold:
-                onset_idx = i
-                break
-        
-        onset_lat = time[onset_idx]
-        peak_lat = time[p_idx]
-        
-        # Velocity
-        latency_sec = onset_lat / 1000.0 if onset_lat > 0 else 1e-9
-        velocity = self.dist_m / latency_sec if latency_sec > 0 else 0
-        
+        # Automated Peak Detection Disabled as per user request
         return {
             "time": time,
             "signal": signal,
-            "p_idx": p_idx,
-            "n_idx": n_idx,
-            "onset_idx": onset_idx,
-            "onset_lat": onset_lat,
-            "peak_lat": peak_lat,
-            "p2p_amp": p2p_amp,
-            "velocity": velocity
+            "p_idx": 0,
+            "n_idx": 0,
+            "onset_idx": 0,
+            "onset_lat": 0,
+            "peak_lat": 0,
+            "p2p_amp": 0,
+            "velocity": 0
         }
 
 class AccessLockDialog(QDialog):
@@ -444,7 +431,7 @@ class AccessLockDialog(QDialog):
         btn_layout.addWidget(self.btn_login)
         layout.addLayout(btn_layout)
         
-        self.master_hash = "92e43ee76839fad67687b3c863e5f9dfe1c6d6d1d9cfee2c5509502ca60db200"
+        self.master_hash = "7be997626e3aa490eb0acc78e1f4f378e0a21a834b0769e271c9186b81f80076"
 
     def verify_key(self):
         key = self.key_input.text().strip()
@@ -466,10 +453,11 @@ class NeuroDiagMainWindow(QMainWindow):
         self.sensory_backend = SensoryBackend()
         
         self.setWindowTitle("NeuroDiag v0.1-alpha")
-        self.showMaximized()
+        self.showFullScreen()
         self.current_labels = ["Site 1", "Site 2"] 
         self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
         self.last_fwave_df = None
+        self.current_test_item = ""
         
         # File storage for folder import
         self.patient_folder = None
@@ -577,82 +565,56 @@ class NeuroDiagMainWindow(QMainWindow):
         self.sidebar_frame.setFixedWidth(280)
         self.sidebar_frame.setStyleSheet("background-color: white; border-right: 1px solid #e9ecef;")
         layout = QVBoxLayout(self.sidebar_frame)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 25, 20, 20)
+        layout.setSpacing(8)
 
-        # 1. Logo Section
-        logo_layout = QHBoxLayout()
-        logo_icon = QLabel("🧠") # Placeholder for icon
-        logo_icon.setFixedSize(48, 48)
-        logo_icon.setAlignment(Qt.AlignCenter)
-        logo_icon.setStyleSheet("""
-            background-color: #2979ff; 
-            border-radius: 8px; 
-            color: white; 
-            font-size: 24px;
-        """)
-        logo_layout.addWidget(logo_icon)
-        
-        title_vbox = QVBoxLayout()
-        title_vbox.setSpacing(0)
-        app_name = QLabel("NeuroDiag <span style='color: #2979ff;'>v1.0-alpha</span>")
-        app_name.setStyleSheet("font-weight: 800; font-size: 16px; color: #333;")
-        
-        app_sub_name = QLabel("DIAGNOSTIC INTERFACE")
-        app_sub_name.setStyleSheet("color: #999; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
-        
-        title_vbox.addWidget(app_name)
-        title_vbox.addWidget(app_sub_name)
-        logo_layout.addLayout(title_vbox)
-        logo_layout.addStretch()
-        layout.addLayout(logo_layout)
-        
-        layout.addSpacing(15)
-
-        # 2. Premium Patient Card
+        # 1. Patient Card (Clean Design like Reference)
         self.patient_card = QFrame()
-        self.patient_card.setMinimumHeight(140)
         self.patient_card.setObjectName("PatientCard")
         self.patient_card.setStyleSheet("""
             #PatientCard {
-                background-color: #f8fbff; 
-                border: 1px solid #e1effe; 
-                border-radius: 16px; 
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e8f4fd, stop:1 #f8fbff);
+                border: 1px solid #d1e6ff;
+                border-left: 4px solid #2979ff;
+                border-radius: 12px;
             }
         """)
         
-        # Add Subtle Shadow
         from PyQt5.QtWidgets import QGraphicsDropShadowEffect
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 15))
+        shadow.setBlurRadius(12)
+        shadow.setOffset(0, 3)
+        shadow.setColor(QColor(41, 121, 255, 25))
         self.patient_card.setGraphicsEffect(shadow)
         
         card_layout = QVBoxLayout(self.patient_card)
-        card_layout.setContentsMargins(15, 15, 15, 15)
-        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setSpacing(12)
         
+        # User Info Row
         user_info_row = QHBoxLayout()
+        user_info_row.setSpacing(12)
+        
         # Avatar Circle
         self.avatar_label = QLabel("??")
-        self.avatar_label.setFixedSize(44, 44)
+        self.avatar_label.setFixedSize(48, 48)
         self.avatar_label.setAlignment(Qt.AlignCenter)
         self.avatar_label.setStyleSheet("""
-            background-color: #d1e6ff; 
-            color: #2979ff; 
-            border-radius: 22px; 
-            font-weight: 800; 
-            font-size: 15px;
+            background-color: #d1e6ff;
+            color: #2979ff;
+            border-radius: 24px;
+            font-weight: 800;
+            font-size: 16px;
         """)
         user_info_row.addWidget(self.avatar_label)
         
+        # Name and ID
         user_text_vbox = QVBoxLayout()
         user_text_vbox.setSpacing(2)
         self.name_label = QLabel("Belum Ada Pasien")
         self.name_label.setStyleSheet("font-weight: 700; font-size: 14px; color: #1a202c;")
         self.id_label = QLabel("ID: -")
-        self.id_label.setStyleSheet("color: #2979ff; font-size: 11px; font-weight: bold;")
+        self.id_label.setStyleSheet("color: #2979ff; font-size: 11px; font-weight: 600;")
         user_text_vbox.addWidget(self.name_label)
         user_text_vbox.addWidget(self.id_label)
         user_info_row.addLayout(user_text_vbox)
@@ -661,75 +623,176 @@ class NeuroDiagMainWindow(QMainWindow):
         card_layout.addLayout(user_info_row)
         
         # Edit Button
-        self.btn_edit_patient = QPushButton(" 📘  Edit Data Pasien")
+        self.btn_edit_patient = QPushButton("✏️  Edit Data Pasien")
         self.btn_edit_patient.setCursor(Qt.PointingHandCursor)
         self.btn_edit_patient.setStyleSheet("""
             QPushButton {
-                background-color: white; 
-                border: 1px solid #e1effe; 
-                border-radius: 8px; 
-                padding: 10px; 
-                color: #2979ff; 
-                font-weight: 800;
+                background-color: white;
+                border: 1px solid #d1e6ff;
+                border-radius: 8px;
+                padding: 10px 16px;
+                color: #4a5568;
+                font-weight: 600;
                 font-size: 12px;
             }
-            QPushButton:hover { 
-                background-color: #f1f7ff; 
-                border: 1px solid #2979ff;
+            QPushButton:hover {
+                background-color: #f0f7ff;
+                border-color: #2979ff;
+                color: #2979ff;
             }
         """)
         card_layout.addWidget(self.btn_edit_patient)
         
         layout.addWidget(self.patient_card)
+        layout.addSpacing(20)
 
-        # 3. NCS Examination Section
+        # 2. NCS Examination Section Header
         header_ncs = QLabel("PEMERIKSAAN NCS")
-        header_ncs.setStyleSheet("color: #a0aec0; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; margin-top: 25px; margin-left: 5px;")
+        header_ncs.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-left: 4px;")
         layout.addWidget(header_ncs)
+        layout.addSpacing(6)
 
-        # 4. Styled Menu List
-        self.menu_list = QListWidget()
-        self.menu_list.setObjectName("SidebarMenu")
-        self.menu_list.setStyleSheet("""
-            #SidebarMenu { border: none; background: transparent; outline: none; }
-            #SidebarMenu::item {
-                border-radius: 12px;
-                padding: 14px 12px;
-                margin-bottom: 6px;
-                color: #4a5568;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            #SidebarMenu::item:hover { background-color: #f7fafc; }
-            #SidebarMenu::item:selected {
-                background-color: #ebf4ff;
-                color: #2979ff;
-                border-left: 5px solid #2979ff;
-            }
-        """)
+        # 3. NCS Menu Items (Custom Buttons for better styling)
+        self.menu_buttons = []
         
-        # Add items with space for icons
-        self.menu_list.addItem("   ⚡   Motor NCS")
-        self.menu_list.addItem("   〰️   F-Wave Analysis")
-        self.menu_list.addItem("   �   Sensory NCS")
-        self.menu_list.setCurrentRow(0)
-        self.menu_list.setMinimumHeight(180)
-        self.menu_list.currentRowChanged.connect(self.on_menu_change)
-        layout.addWidget(self.menu_list)
+        menu_items = [
+            ("⚡", "Motor NCS", "motor"),
+            ("≋", "F-Wave Analysis", "fwave"),
+            ("◎", "Sensory NCS", "sensory")
+        ]
+        
+        for icon, label, mode in menu_items:
+            btn = QPushButton(f"  {icon}    {label}")
+            btn.setProperty("mode", mode)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setCheckable(True)
+            btn.setStyleSheet(self._get_menu_button_style())
+            btn.clicked.connect(lambda checked, m=mode: self.on_menu_button_clicked(m))
+            self.menu_buttons.append(btn)
+            layout.addWidget(btn)
+        
+        # Select first button by default
+        self.menu_buttons[0].setChecked(True)
+        
+        layout.addSpacing(20)
 
-        # 5. Results Section (Re-added)
-        header_res = QLabel("HASIL")
-        header_res.setStyleSheet("color: #a0aec0; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; margin-top: 20px; margin-left: 5px;")
+        # 4. Analysis & Results Section Header
+        header_res = QLabel("ANALISIS & HASIL")
+        header_res.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-left: 4px;")
         layout.addWidget(header_res)
+        layout.addSpacing(6)
         
-        self.res_list = QListWidget()
-        self.res_list.addItem("   📊   Diagnosis Otomatis")
-        self.res_list.addItem("   📝   Clinical Summary")
-        self.res_list.setStyleSheet(self.menu_list.styleSheet())
-        self.res_list.setMaximumHeight(120)
-        layout.addWidget(self.res_list)
+        # Analysis Menu Items
+        analysis_items = [
+            ("🧠", "Diagnosis Otomatis", "diagnosis", True),  # True = has NEW badge
+            ("🖨️", "Print Laporan", "print", False)
+        ]
+        
+        self.analysis_buttons = []
+        for icon, label, action, has_badge in analysis_items:
+            btn_container = QWidget()
+            btn_layout = QHBoxLayout(btn_container)
+            btn_layout.setContentsMargins(0, 0, 0, 0)
+            btn_layout.setSpacing(0)
+            
+            btn = QPushButton(f"  {icon}    {label}")
+            btn.setProperty("action", action)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(self._get_analysis_button_style())
+            btn.clicked.connect(lambda checked, a=action: self.on_analysis_button_clicked(a))
+            btn_layout.addWidget(btn)
+            
+            if has_badge:
+                badge = QLabel("NEW")
+                badge.setStyleSheet("""
+                    background-color: #10b981;
+                    color: white;
+                    font-size: 9px;
+                    font-weight: 700;
+                    padding: 3px 8px;
+                    border-radius: 10px;
+                    margin-right: 8px;
+                """)
+                badge.setFixedHeight(20)
+                btn_layout.addWidget(badge)
+            
+            self.analysis_buttons.append(btn)
+            layout.addWidget(btn_container)
 
         layout.addStretch()
+
+        # Final Branding & Copyright Notice
+        copyright_footer = QLabel("Lab Proteksi Radiasi Universitas Brawijaya\nCopyright © 2024 - All Rights Reserved")
+        copyright_footer.setStyleSheet("""
+            color: #94a3b8;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 10px;
+            border-top: 1px solid #f8fafc;
+        """)
+        copyright_footer.setAlignment(Qt.AlignCenter)
+        layout.addWidget(copyright_footer)
+    
+    def _get_menu_button_style(self):
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 10px;
+                padding: 14px 12px;
+                color: #64748b;
+                font-weight: 600;
+                font-size: 13px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #f1f5f9;
+            }
+            QPushButton:checked {
+                background-color: #e0f2fe;
+                color: #0284c7;
+                border-left: 4px solid #0284c7;
+                padding-left: 8px;
+            }
+        """
+    
+    def _get_analysis_button_style(self):
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 10px;
+                padding: 14px 12px;
+                color: #64748b;
+                font-weight: 600;
+                font-size: 13px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #f1f5f9;
+            }
+        """
+    
+    def on_menu_button_clicked(self, mode):
+        # Uncheck all other buttons
+        for btn in self.menu_buttons:
+            btn.setChecked(btn.property("mode") == mode)
+        
+        # Switch view based on mode
+        if mode == "motor":
+            self.switch_view("MOTOR_NCS")
+        elif mode == "fwave":
+            self.switch_view("F_WAVE")
+        elif mode == "sensory":
+            self.switch_view("SENSORY_NCS")
+    
+    def on_analysis_button_clicked(self, action):
+        if action == "diagnosis":
+            # TODO: Open diagnosis dialog
+            QMessageBox.information(self, "Diagnosis Otomatis", "Fitur Diagnosis Otomatis akan segera hadir!")
+        elif action == "print":
+            # TODO: Open print dialog
+            QMessageBox.information(self, "Print Laporan", "Fitur Print Laporan akan segera hadir!")
 
     def create_center_content(self):
         self.center_frame = QFrame()
@@ -1142,9 +1205,16 @@ class NeuroDiagMainWindow(QMainWindow):
              QMessageBox.warning(self, "Warning", "Could not analyze Motor NCS data")
              return
         
+        # Merge sensitivity for dynamic scaling
+        if metadata and "sensitivity" in metadata:
+            result["sensitivity"] = metadata["sensitivity"]
+            
         self.update_ui_motor(result)
 
     def process_f_wave(self, filename):
+        # Reset manual override to 20 ms for new file loads
+        self.fwave_backend.manual_cut_time = 20.0
+        
         df, metadata = self.fwave_backend.load_data(filename)
         if df is None:
              QMessageBox.critical(self, "Error", "Failed to load F-Wave data")
@@ -1158,10 +1228,16 @@ class NeuroDiagMainWindow(QMainWindow):
               QMessageBox.warning(self, "Warning", "Could not analyze F-Wave data")
               return
         
-        # Update slider range based on duration (time[-1])
-        # Convert to units of 0.1ms
+        # Update slider range
         max_ms = result['time'][-1]
         self.fwave_cut_slider.setMaximum(int(max_ms * 10))
+        
+        # Synchronize Slider UI with detected cut time
+        cut_ms = result['cut_time']
+        self.fwave_cut_slider.blockSignals(True)
+        self.fwave_cut_slider.setValue(int(cut_ms * 10))
+        self.fwave_cut_slider.blockSignals(False)
+        self.fwave_cut_label.setText(f"{cut_ms:.1f} ms")
         
         self.update_ui_fwave(result)
 
@@ -1174,6 +1250,9 @@ class NeuroDiagMainWindow(QMainWindow):
         self.update_patient_info(metadata)
         
         result = self.sensory_backend.analyze(df)
+        if result and metadata and "sensitivity" in metadata:
+            result["sensitivity"] = metadata["sensitivity"]
+            
         if result is None:
               QMessageBox.warning(self, "Warning", "Could not analyze Sensory NCS data")
               return
@@ -1192,24 +1271,33 @@ class NeuroDiagMainWindow(QMainWindow):
             if "id" in metadata:
                 self.id_label.setText(f"ID: {metadata['id']}")
             if "test_item" in metadata:
-                self.title_label.setText(metadata['test_item'])
+                self.current_test_item = metadata['test_item']
 
 
     def update_ui_motor(self, res):
-        # Update Motor Summary Table
-        self.s1_lat.setText(f"{res['p1_t']:.2f}")
-        self.s1_amp.setText(f"{res['amp1_mV']:.2f}")
-        self.s2_lat.setText(f"{res['p2_t']:.2f}")
-        self.s2_amp.setText(f"{res['amp2_mV']:.2f}")
+        # Update Motor Summary Table - Handle None values from disabled detection
+        def fmt(val): return f"{val:.2f}" if (val is not None) else "-"
+        
+        self.s1_lat.setText(fmt(res['p1_t']))
+        self.s1_amp.setText(fmt(res['amp1_mV']) if res['amp1_mV'] != 0 else "-")
+        self.s2_lat.setText(fmt(res['p2_t']))
+        self.s2_amp.setText(fmt(res['amp2_mV']) if res['amp2_mV'] != 0 else "-")
         
         # Update Conduction Velocity Analysis
-        delta = res['p2_t'] - res['p1_t']
-        self.delta_val.setText(f"{delta:.2f}")
-        self.dist_input.setText(f"{res.get('distance_mm', 250)}")
-        self.ncv_val.setText(f"{res['velocity']:.1f}")
+        if res['p1_t'] is not None and res['p2_t'] is not None:
+            delta = res['p2_t'] - res['p1_t']
+            self.delta_val.setText(f"{delta:.2f}")
+        else:
+            self.delta_val.setText("-")
+            
+        self.dist_input.setText(f"{res.get('distance_mm', 80)}")
+        self.ncv_val.setText(f"{res['velocity']:.1f}" if res['velocity'] > 0 else "-")
         
         # Update status badge with solid colors
-        if res['velocity'] >= 50:
+        if res['velocity'] <= 0:
+            self.ncv_status.setText("-")
+            self.ncv_status.setStyleSheet("font-size: 10px; font-weight: bold; color: #6c757d; background-color: #e9ecef; padding: 6px 12px; border-radius: 4px;")
+        elif res['velocity'] >= 50:
             self.ncv_status.setText("NORMAL")
             self.ncv_status.setStyleSheet("font-size: 10px; font-weight: bold; color: white; background-color: #4CAF50; padding: 6px 12px; border-radius: 4px;")
         else:
@@ -1226,9 +1314,9 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.grid(True, which='major', axis='both', linestyle=':', color='lightgray', linewidth=0.5)
         
         # Plotting parameters
-        # Notebook logic: wave / 2.0 (2mV/div)
-        # Scale: 1 unit on Y axis = 1 Division
-        mv_per_div = 2.0
+        # Scaling: Sensitivity can be dynamic (e.g., 2000 uV/Div)
+        uv_per_div = res.get('sensitivity', 5000.0) # default 5 mV
+        mv_per_div = uv_per_div / 1000.0
         
         trace1_div = (res['trace1'] / 1000.0) / mv_per_div
         trace2_div = (res['trace2'] / 1000.0) / mv_per_div
@@ -1249,18 +1337,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.text(res['time'][-1] + 1, 0, f" {label1}", va='center', fontsize=9, fontweight='bold')
         self.canvas.axes.text(res['time'][-1] + 1, -offset_div, f" {label2}", va='center', fontsize=9, fontweight='bold')
 
-        # Peak Markers
-        if res['p1_t'] is not None:
-             p1_div = (res['p1_val'] / 1000.0) / mv_per_div
-             self.canvas.axes.plot(res['p1_t'], p1_div, 'o', color='red', markersize=6)
-             self.canvas.axes.text(res['p1_t'], p1_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
-             
-        if res['p2_t'] is not None:
-             p2_div = ((res['p2_val'] / 1000.0) / mv_per_div) - offset_div
-             self.canvas.axes.plot(res['p2_t'], p2_div, 'o', color='red', markersize=6)
-             self.canvas.axes.text(res['p2_t'], p2_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
-
-        # Baseline markers (Green squares)
+        # Baseline markers (Green squares) at t=0
         z_idx = res['zero_idx']
         t_zero = res['time'][z_idx]
         b1_div = (res['b1_val'] / 1000.0) / mv_per_div
@@ -1278,10 +1355,15 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.text(0, ann_y, f"{int(mv_per_div)} mV/Div", va='top', ha='left', fontsize=10, fontweight='bold')
         self.canvas.axes.text(res['time'][-1], ann_y, "5 ms/Div", va='top', ha='right', fontsize=10, color='gray')
 
-        # Setup Axes Limits
+        # Axis Limits
         self.canvas.axes.set_xlim(0, res['time'][-1] + 7)
         self.canvas.axes.set_xticks(np.arange(0, res['time'][-1] + 5, 5)) 
-        self.canvas.axes.set_ylim(ann_y - 1, 3) # Room for both traces and annotations
+        self.canvas.axes.set_ylim(ann_y - 1, 3) 
+        
+        # Test Item Label
+        if self.current_test_item:
+            self.canvas.axes.text(0, 2.5, self.current_test_item, 
+                                  va='bottom', ha='left', fontsize=11, fontweight='bold', color='#2c3e50')
         
         self.canvas.axes.spines['top'].set_visible(False)
         self.canvas.axes.spines['right'].set_visible(False)
@@ -1296,6 +1378,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.footer_info_r.setText(f"Sensitivity: {int(mv_per_div)} mV/Div")
 
     def update_ui_fwave(self, res, fast_update=False):
+        """Plot F-Wave traces with automated cut point and reversed stacking order"""
         time = res['time']
         cut_time = res['cut_time']
         traces = res['traces']
@@ -1304,6 +1387,9 @@ class NeuroDiagMainWindow(QMainWindow):
              return
              
         cut_idx = np.argmin(np.abs(time - cut_time))
+        spacing = 1.5
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
         if not fast_update or not hasattr(self, 'fwave_lines_w1') or not self.fwave_lines_w1:
             self.canvas.axes.clear()
@@ -1325,15 +1411,12 @@ class NeuroDiagMainWindow(QMainWindow):
             self.canvas.axes.spines['bottom'].set_visible(True)
             self.canvas.axes.spines['bottom'].set_color('gray')
     
-            # Plotting parameters
-            vertical_offset = 0
-            spacing = 1.5 
-            
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                      '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-            
+            num_traces = len(traces[:10])
             for i, trace in enumerate(traces[:10]): 
                 color = colors[i % len(colors)]
+                
+                # Reverse offset: i=0 (Tr 1) at top, i=9 (Tr 10) at bottom
+                v_offset = (num_traces - 1 - i) * spacing
                 
                 # Plot segments (Initial setup)
                 l1, = self.canvas.axes.plot([], [], color=color, linewidth=1.2)
@@ -1342,16 +1425,18 @@ class NeuroDiagMainWindow(QMainWindow):
                 self.fwave_lines_w2.append(l2)
                 
                 # Trace Label
-                lbl = self.canvas.axes.text(time[-1] + 1, vertical_offset, f"Tr {i+1}", 
+                lbl = self.canvas.axes.text(time[-1] + 1, v_offset, f"Tr {i+1}", 
                                       va='center', ha='left', fontsize=9, color=color, fontweight='bold')
                 self.fwave_labels.append(lbl)
-                vertical_offset += spacing
+                
+            # Final vertical offset for ylim
+            total_height = (num_traces - 1) * spacing
             
             # Main vertical separator
             self.fwave_vline = self.canvas.axes.axvline(x=cut_time, color='#adb5bd', linestyle='-', linewidth=2, alpha=0.6)
     
             # Scale annotations
-            self.canvas.axes.set_yticks(np.arange(-1, vertical_offset + 1, 1))
+            self.canvas.axes.set_yticks(np.arange(-1, total_height + 2, 1))
             self.canvas.axes.set_yticklabels([])
             
             ann_y = -1.0 
@@ -1361,26 +1446,36 @@ class NeuroDiagMainWindow(QMainWindow):
     
             # Axis Limits
             self.canvas.axes.set_xlim(0, time[-1] + 8)
-            self.canvas.axes.set_ylim(ann_y - 0.5, vertical_offset)
+            self.canvas.axes.set_ylim(ann_y - 0.5, total_height + 1)
             self.canvas.axes.set_xlabel("Time (ms)")
             self.canvas.axes.set_ylabel("") # Ensure ylabel is set to empty string
             
+            # Test Item Label
+            if self.current_test_item:
+                self.canvas.axes.text(0, total_height + 0.5, self.current_test_item, 
+                                      va='bottom', ha='left', fontsize=11, fontweight='bold', color='#2c3e50')
+            
         # Common Update Logic (Fast and Initial)
-        vertical_offset = 0
+        num_traces = len(traces[:10])
         spacing = 1.5
         for i, trace in enumerate(traces[:10]):
             trace_mV = trace / 1000.0
+            v_offset = (num_traces - 1 - i) * spacing
             
             # Split with overlap at cut_idx to ensure seamless connection
             t1 = time[:cut_idx+1]
-            w1 = (trace_mV[:cut_idx+1] / 5.0) + vertical_offset
+            w1 = (trace_mV[:cut_idx+1] / 5.0) + v_offset
             
             t2 = time[cut_idx:]
-            w2 = (trace_mV[cut_idx:] / 0.5) + vertical_offset
+            w2 = (trace_mV[cut_idx:] / 0.5) + v_offset
             
             self.fwave_lines_w1[i].set_data(t1, w1)
             self.fwave_lines_w2[i].set_data(t2, w2)
-            vertical_offset += spacing
+            
+            # Update label position too in case of fast update? 
+            # Labels usually stay put, but let's ensure they are at v_offset
+            if i < len(self.fwave_labels):
+                self.fwave_labels[i].set_position((time[-1] + 1, v_offset))
             
         # Update vertical line
         self.fwave_vline.set_xdata([cut_time, cut_time])
@@ -1405,10 +1500,12 @@ class NeuroDiagMainWindow(QMainWindow):
         self.footer_info_r.setText("Scale: Split Gain (Upward Stacked)")
 
     def update_ui_sensory(self, res):
-        # Update Inputs
-        self.s1_lat.setText(f"{res['onset_lat']:.2f}")
-        self.s1_amp.setText(f"{res['p2p_amp']:.1f}")
-        self.ncv_val.setText(f"{res['velocity']:.1f}")
+        # Update Inputs - Handle 0/None from disabled detection
+        def fmt(val): return f"{val:.2f}" if (val is not None and val != 0) else "-"
+        
+        self.s1_lat.setText(fmt(res['onset_lat']))
+        self.s1_amp.setText(f"{res['p2p_amp']:.1f}" if res['p2p_amp'] != 0 else "-")
+        self.ncv_val.setText(f"{res['velocity']:.1f}" if res['velocity'] > 0 else "-")
 
         # Plot
         self.canvas.axes.clear()
@@ -1426,26 +1523,13 @@ class NeuroDiagMainWindow(QMainWindow):
         time = res['time']
         signal = res['signal']
         
-        # Scaling: 20 uV/Div
-        uv_per_div = 20.0
+        # Scaling: Sensitivity can be dynamic (e.g., 20 uV/Div)
+        uv_per_div = res.get('sensitivity', 20.0)
         signal_div = signal / uv_per_div
 
         self.canvas.axes.plot(time, signal_div, color='#212529', linewidth=1.2)
         
-        # Peak & Trough markers
-        p_div = signal[res['p_idx']] / uv_per_div
-        n_div = signal[res['n_idx']] / uv_per_div
-        o_div = signal[res['onset_idx']] / uv_per_div
-        
-        self.canvas.axes.plot(time[res['p_idx']], p_div, 'o', color='red', markersize=6)
-        self.canvas.axes.plot(time[res['n_idx']], n_div, 'o', color='red', markersize=6)
-        
-        # Onset marker (Green)
-        self.canvas.axes.plot(time[res['onset_idx']], o_div, 's', color='green', markersize=5)
-
-        # Labels
-        self.canvas.axes.text(time[res['p_idx']], p_div + 0.3, "P", ha='center', color='red', fontweight='bold', fontsize=8)
-        self.canvas.axes.text(time[res['n_idx']], n_div - 0.3, "T", ha='center', va='top', color='red', fontweight='bold', fontsize=8)
+        # Peak & Trough markers Disabled
 
         # Determine range for sensory
         v_ext = max(abs(np.max(signal_div)), abs(np.min(signal_div)))
@@ -1464,6 +1548,11 @@ class NeuroDiagMainWindow(QMainWindow):
         self.canvas.axes.set_xlim(0, time[-1] + 5)
         self.canvas.axes.set_xticks(np.arange(0, time[-1] + 5, 5))
         self.canvas.axes.set_ylim(ann_y - 0.5, v_ext + 1)
+        
+        # Test Item Label
+        if self.current_test_item:
+            self.canvas.axes.text(0, v_ext + 0.5, self.current_test_item, 
+                                  va='bottom', ha='left', fontsize=11, fontweight='bold', color='#2c3e50')
         
         self.canvas.axes.set_xlabel("Time (ms)")
         self.canvas.axes.set_ylabel("")
@@ -1504,16 +1593,11 @@ if __name__ == '__main__':
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    # Show Access Lock (Temporarily disabled for development)
-    # lock = AccessLockDialog()
-    # if lock.exec_() == QDialog.Accepted:
-    #     window = NeuroDiagMainWindow()
-    #     window.showMaximized()
-    #     sys.exit(app.exec_())
-    # else:
-    #     sys.exit(0)
-
-    # Direct launch
-    window = NeuroDiagMainWindow()
-    window.showMaximized()
-    sys.exit(app.exec_())
+    # Show Access Lock
+    lock = AccessLockDialog()
+    if lock.exec_() == QDialog.Accepted:
+        window = NeuroDiagMainWindow()
+        window.showMaximized()
+        sys.exit(app.exec_())
+    else:
+        sys.exit(0)
