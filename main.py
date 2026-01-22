@@ -6,7 +6,7 @@ from scipy.signal import find_peaks
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
                              QFrame, QSplitter, QSizePolicy, QLineEdit, QGroupBox, QGridLayout, 
-                             QFileDialog, QMessageBox, QDialog, QSlider)
+                             QFileDialog, QMessageBox, QDialog, QSlider, QTreeWidget, QTreeWidgetItem, QComboBox, QTabWidget)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -117,10 +117,9 @@ class MotorNCSBackend:
         trace1_raw = df.iloc[start_index:, 0].values
         trace2_raw = df.iloc[start_index:, 1].values
 
-        # Motor NCS Polaritas: Flip BOTH traces (masing-masing gelombang) to ensure they match reference phase
-        # User confirmed that even with auto_invert, the phase was reversed (Up-Down instead of Down-Up)
-        trace1 = self.auto_invert(trace1_raw) * -1
-        trace2 = self.auto_invert(trace2_raw) * -1
+        # Flip BOTH traces vertically (Up-Down instead of Down-Up) to ensure standard medical phase
+        trace1 = self.auto_invert(trace1_raw)
+        trace2 = self.auto_invert(trace2_raw)
 
         # Automated Peak Detection Disabled as per user request
         zero_idx = np.argmin(np.abs(time_cut - 0))
@@ -367,6 +366,8 @@ class SensoryBackend:
             return None
             
         signal = df["Signal"].values
+        # Flip vertically as requested by user (data is inverted)
+        signal = -signal
         N = len(signal)
         time = np.arange(N) * self.dt
         
@@ -565,8 +566,8 @@ class NeuroDiagMainWindow(QMainWindow):
         self.sidebar_frame.setFixedWidth(280)
         self.sidebar_frame.setStyleSheet("background-color: white; border-right: 1px solid #e9ecef;")
         layout = QVBoxLayout(self.sidebar_frame)
-        layout.setContentsMargins(20, 25, 20, 20)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 15, 12, 10)
+        layout.setSpacing(4)
 
         # 1. Patient Card (Clean Design like Reference)
         self.patient_card = QFrame()
@@ -644,94 +645,83 @@ class NeuroDiagMainWindow(QMainWindow):
         card_layout.addWidget(self.btn_edit_patient)
         
         layout.addWidget(self.patient_card)
-        layout.addSpacing(20)
+        layout.addSpacing(10)
 
         # 2. NCS Examination Section Header
         header_ncs = QLabel("PEMERIKSAAN NCS")
-        header_ncs.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-left: 4px;")
+        header_ncs.setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-left: 4px;")
         layout.addWidget(header_ncs)
-        layout.addSpacing(6)
+        layout.addSpacing(4)
 
-        # 3. NCS Menu Items (Custom Buttons for better styling)
-        self.menu_buttons = []
+        # Dynamic Navigation Tree (Unified for NCS & F-Wave)
+        self.menu_buttons = [] # Kept for compatibility, now empty
         
-        menu_items = [
-            ("⚡", "Motor NCS", "motor"),
-            ("≋", "F-Wave Analysis", "fwave"),
-            ("◎", "Sensory NCS", "sensory")
-        ]
+        self.syaraf_tree = QTreeWidget()
+        self.syaraf_tree.setHeaderHidden(True)
+        self.syaraf_tree.setIndentation(16)
+        self.syaraf_tree.setAnimated(True)
+        self.syaraf_tree.setStyleSheet(self._get_tree_style())
+        self.syaraf_tree.itemClicked.connect(self.on_syaraf_item_clicked)
+        layout.addWidget(self.syaraf_tree, stretch=1) # Allow tree to expand
         
-        for icon, label, mode in menu_items:
-            btn = QPushButton(f"  {icon}    {label}")
-            btn.setProperty("mode", mode)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setCheckable(True)
-            btn.setStyleSheet(self._get_menu_button_style())
-            btn.clicked.connect(lambda checked, m=mode: self.on_menu_button_clicked(m))
-            self.menu_buttons.append(btn)
-            layout.addWidget(btn)
-        
-        # Select first button by default
-        self.menu_buttons[0].setChecked(True)
-        
-        layout.addSpacing(20)
-
-        # 4. Analysis & Results Section Header
-        header_res = QLabel("ANALISIS & HASIL")
-        header_res.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-left: 4px;")
-        layout.addWidget(header_res)
-        layout.addSpacing(6)
-        
-        # Analysis Menu Items
-        analysis_items = [
-            ("🧠", "Diagnosis Otomatis", "diagnosis", True),  # True = has NEW badge
-            ("🖨️", "Print Laporan", "print", False)
-        ]
-        
-        self.analysis_buttons = []
-        for icon, label, action, has_badge in analysis_items:
-            btn_container = QWidget()
-            btn_layout = QHBoxLayout(btn_container)
-            btn_layout.setContentsMargins(0, 0, 0, 0)
-            btn_layout.setSpacing(0)
-            
-            btn = QPushButton(f"  {icon}    {label}")
-            btn.setProperty("action", action)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(self._get_analysis_button_style())
-            btn.clicked.connect(lambda checked, a=action: self.on_analysis_button_clicked(a))
-            btn_layout.addWidget(btn)
-            
-            if has_badge:
-                badge = QLabel("NEW")
-                badge.setStyleSheet("""
-                    background-color: #10b981;
-                    color: white;
-                    font-size: 9px;
-                    font-weight: 700;
-                    padding: 3px 8px;
-                    border-radius: 10px;
-                    margin-right: 8px;
-                """)
-                badge.setFixedHeight(20)
-                btn_layout.addWidget(badge)
-            
-            self.analysis_buttons.append(btn)
-            layout.addWidget(btn_container)
-
-        layout.addStretch()
-
-        # Final Branding & Copyright Notice
-        copyright_footer = QLabel("Lab Proteksi Radiasi Universitas Brawijaya\nCopyright © 2024 - All Rights Reserved")
-        copyright_footer.setStyleSheet("""
-            color: #94a3b8;
-            font-size: 10px;
-            font-weight: 600;
-            padding: 10px;
-            border-top: 1px solid #f8fafc;
+        # Summary selection combo (compact tab selector)
+        self.summary_combo = QComboBox()
+        self.summary_combo.addItems(["Motor Summary", "Sensory Summary", "F-Wave Summary"])
+        self.summary_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+                color: #334155;
+            }
+            QComboBox::drop-down { border: none; }
         """)
+        self.summary_combo.currentIndexChanged.connect(self.on_summary_changed)
+        layout.addWidget(self.summary_combo)
+        
+        # Placeholder for summary display
+        self.summary_label = QLabel("Summary will be shown here.")
+        self.summary_label.setStyleSheet("color: #475569; font-size: 11px; padding: 6px;")
+        layout.addWidget(self.summary_label)
+        
+        # Summary tabs (final column)
+        self.summary_tabs = QTabWidget()
+        
+        self.summary_tabs.addTab(QLabel("Motor summary content..."), "Motor")
+        self.summary_tabs.addTab(QLabel("Sensory summary content..."), "Sensory")
+        self.summary_tabs.addTab(QLabel("F‑Wave summary content..."), "F‑Wave")
+        self.summary_tabs.setStyleSheet("""
+            QTabBar::tab { background: #f8fafc; padding: 6px 12px; margin-right: 2px; }
+            QTabBar::tab:selected { background: #e0f2fe; font-weight: 600; }
+        """)
+        layout.addWidget(self.summary_tabs)
+        layout.addSpacing(8)
+
+        # Final Branding & Copyright Notice (Elegant Design)
+        copyright_container = QFrame()
+        copyright_container.setStyleSheet("""
+            background-color: #f1f5f9;
+            border-top: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-top: 4px;
+        """)
+        copy_layout = QVBoxLayout(copyright_container)
+        copy_layout.setContentsMargins(8, 10, 8, 10)
+        copy_layout.setSpacing(2)
+
+        copyright_footer = QLabel("© Lab Proteksi Radiasi")
+        copyright_footer.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; background: transparent;")
         copyright_footer.setAlignment(Qt.AlignCenter)
-        layout.addWidget(copyright_footer)
+        
+        uni_label = QLabel("Universitas Brawijaya")
+        uni_label.setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: 600; background: transparent;")
+        uni_label.setAlignment(Qt.AlignCenter)
+        
+        copy_layout.addWidget(copyright_footer)
+        copy_layout.addWidget(uni_label)
+        layout.addWidget(copyright_container)
     
     def _get_menu_button_style(self):
         return """
@@ -753,6 +743,33 @@ class NeuroDiagMainWindow(QMainWindow):
                 color: #0284c7;
                 border-left: 4px solid #0284c7;
                 padding-left: 8px;
+            }
+        """
+    
+    def _get_tree_style(self):
+        return """
+            QTreeWidget {
+                background-color: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 4px;
+                color: #334155;
+                font-size: 12px;
+                font-weight: 500;
+                outline: 0;
+            }
+            QTreeWidget::item {
+                padding: 6px 6px;
+                border-radius: 6px;
+                margin: 1px 0;
+            }
+            QTreeWidget::item:hover {
+                background-color: #e0f2fe;
+            }
+            QTreeWidget::item:selected {
+                background-color: #0ea5e9;
+                color: white;
+                font-weight: 600;
             }
         """
     
@@ -914,22 +931,9 @@ class NeuroDiagMainWindow(QMainWindow):
         layout.setContentsMargins(15, 20, 15, 20)
         layout.setSpacing(10)
         
-        # File Selection Section (at top)
-        file_header = QLabel("📁 Pilih File Data")
-        file_header.setStyleSheet("font-weight: bold; font-size: 13px; color: #212529;")
-        layout.addWidget(file_header)
-        
+        # File Selection Section (Hidden as requested)
         self.data_file_list = QListWidget()
-        self.data_file_list.setMaximumHeight(180)
-        self.data_file_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.data_file_list.setStyleSheet("""
-            QListWidget { border: 1px solid #dee2e6; background: white; font-size: 12px; border-radius: 4px; }
-            QListWidget::item { padding: 6px 10px; }
-            QListWidget::item:selected { background-color: #e7f1ff; color: #0d6efd; font-weight: bold; }
-            QListWidget::item:hover { background-color: #f8f9fa; }
-        """)
-        self.data_file_list.itemClicked.connect(self.on_file_selected)
-        layout.addWidget(self.data_file_list)
+        self.data_file_list.hide() 
         
         # Divider
         line = QFrame()
@@ -1150,41 +1154,172 @@ class NeuroDiagMainWindow(QMainWindow):
         fwave_folder = os.path.join(folder, "f wave")
         ncv_folder = os.path.join(folder, "ncv")
         
-        # F-Wave files
+        # F-Wave files - Parse metadata for tree
+        self.fwave_data_tree = {} # {Nerve: {Side: filepath}}
+        if not os.path.exists(fwave_folder):
+            fwave_folder = os.path.join(folder, "F Wave") # Check uppercase
+            
         if os.path.exists(fwave_folder):
             for f in sorted(os.listdir(fwave_folder)):
                 if f.endswith('.csv'):
                     filepath = os.path.join(fwave_folder, f)
                     self.fwave_files.append(filepath)
+                    metadata = self._quick_parse_metadata(filepath)
+                    if metadata and "Test Item" in metadata:
+                        test_item = metadata["Test Item"]
+                        parsed = self._parse_test_item(test_item)
+                        if parsed:
+                            side, nerve, _ = parsed # Mode is F-Wave
+                            if nerve not in self.fwave_data_tree:
+                                self.fwave_data_tree[nerve] = {}
+                            self.fwave_data_tree[nerve][side] = filepath
         
-        # NCV files (1-8 motor, 9-14 sensory)
+        # NCV files - Parse metadata for tree
+        self.ncv_data_tree = {} # {Nerve: {Side: {Mode: filepath}}}
+        if not os.path.exists(ncv_folder):
+            ncv_folder = os.path.join(folder, "NCV")
+            
         if os.path.exists(ncv_folder):
             for f in sorted(os.listdir(ncv_folder)):
                 if f.endswith('.csv'):
                     filepath = os.path.join(ncv_folder, f)
-                    # Extract number from filename
-                    try:
-                        num = int(os.path.splitext(f)[0])
-                        if 1 <= num <= 8:
-                            self.motor_files.append(filepath)
-                        elif 9 <= num <= 14:
-                            self.sensory_files.append(filepath)
-                    except ValueError:
-                        pass
+                    metadata = self._quick_parse_metadata(filepath)
+                    if metadata and "Test Item" in metadata:
+                        test_item = metadata["Test Item"]
+                        # Example: "Right Peroneal Motor" or "Right Sural Anti Sensory"
+                        parsed = self._parse_test_item(test_item)
+                        if parsed:
+                            side, nerve, mode = parsed
+                            if nerve not in self.ncv_data_tree:
+                                self.ncv_data_tree[nerve] = {}
+                            if side not in self.ncv_data_tree[nerve]:
+                                self.ncv_data_tree[nerve][side] = {}
+                            self.ncv_data_tree[nerve][side][mode] = filepath
+
+                            # Backwards compatibility for file lists if needed
+                            if mode == "Motor":
+                                self.motor_files.append(filepath)
+                            else:
+                                self.sensory_files.append(filepath)
+        
+        # Populate the Syaraf Tree
+        self.populate_syaraf_tree()
         
         # Update file list in right panel
         self.update_file_list()
         
-        # Auto-load first file if available in current mode
-        if self.active_mode == "MOTOR_NCS" and self.motor_files:
+        # Auto-expand/load if available
+        if self.motor_files:
+            self.switch_view("MOTOR_NCS")
             self.process_motor_ncs(self.motor_files[0])
-            self.data_file_list.setCurrentRow(0)
-        elif self.active_mode == "F_WAVE" and self.fwave_files:
+        elif self.fwave_files:
+            self.switch_view("F_WAVE")
             self.process_f_wave(self.fwave_files[0])
-            self.data_file_list.setCurrentRow(0)
-        elif self.active_mode == "SENSORY_NCS" and self.sensory_files:
-            self.process_sensory_ncs(self.sensory_files[0])
-            self.data_file_list.setCurrentRow(0)
+        
+    def _quick_parse_metadata(self, filepath):
+        """Quickly read the first few lines of a CSV to get metadata"""
+        meta = {}
+        try:
+            with open(filepath, 'r', encoding='latin-1') as f:
+                for _ in range(15): # Metadata usually in first 10-15 lines
+                    line = f.readline()
+                    if not line: break
+                    parts = line.split(';')
+                    if len(parts) >= 2:
+                        key = parts[0].strip()
+                        val = parts[1].strip().replace('"', '')
+                        meta[key] = val
+        except:
+            pass
+        return meta
+
+    def _parse_test_item(self, test_item):
+        """Robust parse of 'Right Peroneal Motor' or similar"""
+        ts = test_item.lower()
+        side = "Right" if "right" in ts else ("Left" if "left" in ts else "Unknown")
+        mode = "Motor" if "motor" in ts else ("Sensory" if "sensory" in ts else "Unknown")
+        
+        # Extract nerve name by removing keywords
+        nerve = test_item
+        for kw in ["Right", "Left", "Motor", "Sensory", "right", "left", "motor", "sensory", "Anti", "anti"]:
+            nerve = nerve.replace(kw, "")
+        
+        nerve = nerve.strip().replace("  ", " ")
+        if not nerve: nerve = "General"
+        
+        return side, nerve, mode
+
+    def populate_syaraf_tree(self):
+        self.syaraf_tree.clear()
+        
+        root = QTreeWidgetItem(self.syaraf_tree)
+        root.setText(0, "Syaraf")
+        root.setExpanded(True)
+        root.setIcon(0, QIcon()) # Optional icon
+        
+        for nerve in sorted(self.ncv_data_tree.keys()):
+            nerve_item = QTreeWidgetItem(root)
+            nerve_item.setText(0, nerve)
+            # Collapsed by default for compact view
+            
+            for side in sorted(self.ncv_data_tree[nerve].keys()):
+                side_item = QTreeWidgetItem(nerve_item)
+                side_item.setText(0, side)
+                # Collapsed by default for compact view
+                
+                for mode in sorted(self.ncv_data_tree[nerve][side].keys()):
+                    mode_item = QTreeWidgetItem(side_item)
+                    mode_item.setText(0, mode)
+                    mode_item.setData(0, Qt.UserRole, self.ncv_data_tree[nerve][side][mode])
+                    mode_item.setData(0, Qt.UserRole + 1, "NCV_" + mode)
+
+        # F-Wave Branch
+        fw_root = QTreeWidgetItem(self.syaraf_tree)
+        fw_root.setText(0, "F-Wave")
+        # Collapsed by default for compact view
+        
+        for nerve in sorted(self.fwave_data_tree.keys()):
+            nerve_item = QTreeWidgetItem(fw_root)
+            nerve_item.setText(0, nerve)
+            # Collapsed by default for compact view
+            
+            for side in sorted(self.fwave_data_tree[nerve].keys()):
+                side_item = QTreeWidgetItem(nerve_item)
+                side_item.setText(0, side)
+                side_item.setData(0, Qt.UserRole, self.fwave_data_tree[nerve][side])
+                side_item.setData(0, Qt.UserRole + 1, "FWAVE")
+
+    def on_syaraf_item_clicked(self, item, column):
+        # Allow expansion on click if it has children
+        if item.childCount() > 0:
+            item.setExpanded(not item.isExpanded())
+            return
+
+        filepath = item.data(0, Qt.UserRole)
+        role = item.data(0, Qt.UserRole + 1)
+        
+        if not filepath:
+            return
+            
+        if role == "NCV_Motor":
+            self.switch_view("MOTOR_NCS")
+            self.process_motor_ncs(filepath)
+        elif role == "NCV_Sensory":
+            self.switch_view("SENSORY_NCS")
+            self.process_sensory_ncs(filepath)
+        elif role == "FWAVE":
+            self.switch_view("F_WAVE")
+            self.process_f_wave(filepath)
+
+    def on_summary_changed(self, index):
+        # Update summary placeholder based on selection
+        summary_text = self.summary_combo.currentText()
+        self.summary_label.setText(f"{summary_text} will be displayed here.")
+        # Switch tab as well to match
+        if index == 0: self.summary_tabs.setCurrentIndex(0) # Motor
+        elif index == 1: self.summary_tabs.setCurrentIndex(1) # Sensory
+        elif index == 2: self.summary_tabs.setCurrentIndex(2) # F-Wave
+        print(f"Summary tab changed to: {summary_text}")
 
     def process_motor_ncs(self, filename):
         df, metadata = self.motor_backend.load_data(filename)
@@ -1593,11 +1728,11 @@ if __name__ == '__main__':
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    # Show Access Lock
+    # Re-enabled Access Lock
     lock = AccessLockDialog()
     if lock.exec_() == QDialog.Accepted:
         window = NeuroDiagMainWindow()
         window.showMaximized()
         sys.exit(app.exec_())
     else:
-        sys.exit(0)
+        sys.exit()
