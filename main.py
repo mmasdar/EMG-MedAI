@@ -998,118 +998,66 @@ class NeuroDiagMainWindow(QMainWindow):
         self.site2_group = QFrame()  # Dummy for compatibility
         self.site2_group.hide()
 
-        # Conduction Velocity Analysis Section - Clean Modern Design
+        # Conduction Velocity Analysis Section - Clean Simplified Design
         self.cv_group = QFrame()
-        self.cv_group.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2196F3, stop:1 #42A5F5);
-                border-radius: 12px; margin-top: 10px;
-            }
-        """)
+        self.cv_group.setStyleSheet("background-color: white; border: 1px solid #dee2e6; border-radius: 8px; margin-top: 10px;")
         cv_main_layout = QVBoxLayout(self.cv_group)
-        cv_main_layout.setContentsMargins(16, 14, 16, 14)
-        cv_main_layout.setSpacing(12)
+        cv_main_layout.setContentsMargins(12, 12, 12, 12)
+        cv_main_layout.setSpacing(8)
         
-        # Header with icon
-        header_row = QHBoxLayout()
-        header_icon = QLabel("⚡")
-        header_icon.setStyleSheet("font-size: 14px; background: transparent;")
-        header_row.addWidget(header_icon)
+        # Header
         cv_header = QLabel("VELOCITY ANALYSIS")
-        cv_header.setStyleSheet("font-weight: bold; font-size: 12px; color: white; background: transparent; letter-spacing: 1px;")
-        header_row.addWidget(cv_header)
-        header_row.addStretch()
-        cv_main_layout.addLayout(header_row)
+        cv_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #6c757d; letter-spacing: 0.5px;")
+        cv_main_layout.addWidget(cv_header)
         
-        # Values Grid - Delta and Dist side by side
-        values_row = QHBoxLayout()
-        values_row.setSpacing(15)
+        # Values Grid
+        vals_layout = QGridLayout()
+        vals_layout.setSpacing(10)
         
-        # Delta box
-        delta_box = QVBoxLayout()
-        delta_box.setSpacing(4)
-        delta_label = QLabel("Delta (ms)")
-        delta_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
-        delta_box.addWidget(delta_label)
-        
-        delta_val_row = QHBoxLayout()
-        delta_val_row.setSpacing(0)
-        delta_open = QLabel("(")
-        delta_open.setStyleSheet("font-size: 24px; color: rgba(255,255,255,0.5); background: transparent;")
-        delta_val_row.addWidget(delta_open)
+        # Delta
+        vals_layout.addWidget(self._create_header("Delta (ms)", "font-size: 10px; color: #6c757d;"), 0, 0)
         self.delta_val = QLabel("0.00")
-        self.delta_val.setStyleSheet("font-size: 24px; font-weight: bold; color: white; background: transparent;")
-        delta_val_row.addWidget(self.delta_val)
-        delta_val_row.addStretch()
-        delta_box.addLayout(delta_val_row)
-        values_row.addLayout(delta_box)
+        self.delta_val.setStyleSheet("font-size: 14px; font-weight: bold; color: #212529;")
+        vals_layout.addWidget(self.delta_val, 1, 0, alignment=Qt.AlignCenter)
         
-        # Dist box
-        dist_box = QVBoxLayout()
-        dist_box.setSpacing(4)
-        dist_label = QLabel("Dist (mm)")
-        dist_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
-        dist_box.addWidget(dist_label)
-        
-        dist_val_row = QHBoxLayout()
-        dist_val_row.setSpacing(0)
-        dist_open = QLabel("(")
-        dist_open.setStyleSheet("font-size: 24px; color: rgba(255,255,255,0.5); background: transparent;")
-        dist_val_row.addWidget(dist_open)
+        # Distance
+        vals_layout.addWidget(self._create_header("Dist (mm)", "font-size: 10px; color: #6c757d;"), 0, 1)
         self.dist_input = QLabel("0")
-        self.dist_input.setStyleSheet("font-size: 24px; font-weight: bold; color: white; background: transparent;")
-        dist_val_row.addWidget(self.dist_input)
-        dist_val_row.addStretch()
-        dist_box.addLayout(dist_val_row)
-        values_row.addLayout(dist_box)
+        self.dist_input.setStyleSheet("font-size: 14px; font-weight: bold; color: #212529;")
+        vals_layout.addWidget(self.dist_input, 1, 1, alignment=Qt.AlignCenter)
         
-        values_row.addStretch()
-        cv_main_layout.addLayout(values_row)
+        cv_main_layout.addLayout(vals_layout)
         
         # Separator
-        separator = QFrame()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet("background-color: rgba(255,255,255,0.2);")
-        cv_main_layout.addWidget(separator)
+        line_cv = QFrame()
+        line_cv.setFrameShape(QFrame.HLine)
+        line_cv.setStyleSheet("background-color: #f1f3f5;")
+        cv_main_layout.addWidget(line_cv)
         
-        # Result Section
-        result_col = QVBoxLayout()
-        result_col.setSpacing(4)
-        result_label = QLabel("Velocity Result")
-        result_label.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.7); background: transparent;")
-        result_col.addWidget(result_label)
+        # Result Row
+        res_row = QHBoxLayout()
+        res_row.setSpacing(4)
         
-        # Main velocity value with status
-        result_row = QHBoxLayout()
-        result_row.setSpacing(8)
+        res_label = QLabel("Velocity:")
+        res_label.setStyleSheet("font-size: 11px; color: #495057;")
+        res_row.addWidget(res_label)
         
-        vel_val_row = QHBoxLayout()
-        vel_val_row.setSpacing(0)
-        vel_open = QLabel("(")
-        vel_open.setStyleSheet("font-size: 32px; color: rgba(255,255,255,0.5); background: transparent;")
-        vel_val_row.addWidget(vel_open)
         self.ncv_val = QLabel("0.0")
-        self.ncv_val.setStyleSheet("font-size: 32px; font-weight: bold; color: white; background: transparent;")
-        vel_val_row.addWidget(self.ncv_val)
+        self.ncv_val.setStyleSheet("font-size: 16px; font-weight: bold; color: #0d6efd;")
+        res_row.addWidget(self.ncv_val)
         
-        vel_unit = QLabel("M/S")
-        vel_unit.setStyleSheet("font-size: 14px; font-weight: bold; color: rgba(255,255,255,0.8); background: transparent; margin-left: 4px;")
-        vel_val_row.addWidget(vel_unit, alignment=Qt.AlignBottom)
-        result_row.addLayout(vel_val_row)
+        unit_label = QLabel("m/s")
+        unit_label.setStyleSheet("font-size: 11px; color: #6c757d; margin-top: 2px;")
+        res_row.addWidget(unit_label)
         
-        result_row.addStretch()
+        res_row.addStretch()
         
-        # Status badge
+        # Status Badge
         self.ncv_status = QLabel("NORMAL")
-        self.ncv_status.setStyleSheet("""
-            font-size: 10px; font-weight: bold; color: white; 
-            background-color: #4CAF50;
-            padding: 6px 12px; border-radius: 4px;
-        """)
-        result_row.addWidget(self.ncv_status, alignment=Qt.AlignVCenter)
+        self.ncv_status.setStyleSheet("font-size: 9px; font-weight: bold; color: white; background-color: #4CAF50; padding: 3px 8px; border-radius: 4px;")
+        res_row.addWidget(self.ncv_status)
         
-        result_col.addLayout(result_row)
-        cv_main_layout.addLayout(result_col)
+        cv_main_layout.addLayout(res_row)
         
         layout.addWidget(self.cv_group)
         
@@ -1736,3 +1684,4 @@ if __name__ == '__main__':
         sys.exit(app.exec_())
     else:
         sys.exit()
+
