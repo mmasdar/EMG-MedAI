@@ -432,7 +432,7 @@ class AccessLockDialog(QDialog):
         btn_layout.addWidget(self.btn_login)
         layout.addLayout(btn_layout)
         
-        self.master_hash = "7be997626e3aa490eb0acc78e1f4f378e0a21a834b0769e271c9186b81f80076"
+        self.master_hash = "210670300413e64c9f437db44bb404d91fda035a35a78596180cf586d5ce79f0" # Password: proteksiademayem
 
     def verify_key(self):
         key = self.key_input.text().strip()
@@ -453,7 +453,7 @@ class NeuroDiagMainWindow(QMainWindow):
         self.fwave_backend = FWaveBackend()
         self.sensory_backend = SensoryBackend()
         
-        self.setWindowTitle("NeuroDiag v0.1-alpha")
+        self.setWindowTitle("NeuroDiag Ver. 0.2")
         self.showFullScreen()
         self.current_labels = ["Site 1", "Site 2"] 
         self.active_mode = "MOTOR_NCS" # MOTOR_NCS, F_WAVE, SENSORY_NCS
@@ -609,40 +609,50 @@ class NeuroDiagMainWindow(QMainWindow):
         """)
         user_info_row.addWidget(self.avatar_label)
         
-        # Name and ID
+        # Name and ID - Refined Layout
         user_text_vbox = QVBoxLayout()
-        user_text_vbox.setSpacing(2)
+        user_text_vbox.setSpacing(4) # Slightly more breathing room
+        user_text_vbox.setAlignment(Qt.AlignVCenter) # Center vertically with avatar
+        
         self.name_label = QLabel("Belum Ada Pasien")
-        self.name_label.setStyleSheet("font-weight: 700; font-size: 14px; color: #1a202c;")
+        self.name_label.setStyleSheet("font-weight: 800; font-size: 15px; color: #1e293b; letter-spacing: 0.3px;")
+        
         self.id_label = QLabel("ID: -")
-        self.id_label.setStyleSheet("color: #2979ff; font-size: 11px; font-weight: 600;")
+        self.id_label.setStyleSheet("color: #64748b; font-size: 12px; font-weight: 600;")
+        
         user_text_vbox.addWidget(self.name_label)
         user_text_vbox.addWidget(self.id_label)
         user_info_row.addLayout(user_text_vbox)
         user_info_row.addStretch()
         
-        card_layout.addLayout(user_info_row)
-        
-        # Edit Button
-        self.btn_edit_patient = QPushButton("✏️  Edit Data Pasien")
-        self.btn_edit_patient.setCursor(Qt.PointingHandCursor)
-        self.btn_edit_patient.setStyleSheet("""
+        # Open Data Button (New Location)
+        self.btn_open_data = QPushButton("📂  Open Data")
+        self.btn_open_data.setCursor(Qt.PointingHandCursor)
+        self.btn_open_data.setStyleSheet("""
             QPushButton {
-                background-color: white;
-                border: 1px solid #d1e6ff;
-                border-radius: 8px;
-                padding: 10px 16px;
-                color: #4a5568;
-                font-weight: 600;
-                font-size: 12px;
+                 background-color: white;
+                 border: 1px solid #d1e6ff;
+                 border-radius: 8px;
+                 padding: 8px 12px;
+                 color: #2563eb;
+                 font-weight: 600;
+                 font-size: 11px;
+                 margin-top: 4px;
             }
             QPushButton:hover {
-                background-color: #f0f7ff;
-                border-color: #2979ff;
-                color: #2979ff;
+                 background-color: #eff6ff;
+                 border-color: #2563eb;
             }
         """)
-        card_layout.addWidget(self.btn_edit_patient)
+        self.btn_open_data.clicked.connect(self.open_patient_folder)
+        card_layout.addWidget(self.btn_open_data)
+        
+        card_layout.addLayout(user_info_row)
+        
+        # Edit Button REMOVED for cleaner look
+        # self.btn_edit_patient = QPushButton("✏️  Edit Data Pasien")
+        # ... (Removed)
+        # card_layout.addWidget(self.btn_edit_patient)
         
         layout.addWidget(self.patient_card)
         layout.addSpacing(10)
@@ -664,63 +674,100 @@ class NeuroDiagMainWindow(QMainWindow):
         self.syaraf_tree.itemClicked.connect(self.on_syaraf_item_clicked)
         layout.addWidget(self.syaraf_tree, stretch=1) # Allow tree to expand
         
-        # Summary selection combo (compact tab selector)
-        self.summary_combo = QComboBox()
-        self.summary_combo.addItems(["Motor Summary", "Sensory Summary", "F-Wave Summary"])
-        self.summary_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #f8fafc;
-                border: 1px solid #e2e8f0;
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 12px;
-                color: #334155;
-            }
-            QComboBox::drop-down { border: none; }
-        """)
-        self.summary_combo.currentIndexChanged.connect(self.on_summary_changed)
-        layout.addWidget(self.summary_combo)
+        # Summary selection combo (compact tab selector) - REMOVED v0.2
+        # self.summary_combo = QComboBox()
+        # self.summary_combo.addItems(["Motor Summary", "Sensory Summary", "F-Wave Summary"])
+        # self.summary_combo.setStyleSheet("""
+        #     QComboBox {
+        #         background-color: #f8fafc;
+        #         border: 1px solid #e2e8f0;
+        #         border-radius: 6px;
+        #         padding: 4px 8px;
+        #         font-size: 12px;
+        #         color: #334155;
+        #     }
+        #     QComboBox::drop-down { border: none; }
+        # """)
+        # self.summary_combo.currentIndexChanged.connect(self.on_summary_changed)
+        # layout.addWidget(self.summary_combo)
         
-        # Placeholder for summary display
-        self.summary_label = QLabel("Summary will be shown here.")
-        self.summary_label.setStyleSheet("color: #475569; font-size: 11px; padding: 6px;")
-        layout.addWidget(self.summary_label)
+        # Placeholder for summary display - REMOVED v0.2
+        # self.summary_label = QLabel("Summary will be shown here.")
+        # self.summary_label.setStyleSheet("color: #475569; font-size: 11px; padding: 6px;")
+        # layout.addWidget(self.summary_label)
         
-        # Summary tabs (final column)
-        self.summary_tabs = QTabWidget()
-        
-        self.summary_tabs.addTab(QLabel("Motor summary content..."), "Motor")
-        self.summary_tabs.addTab(QLabel("Sensory summary content..."), "Sensory")
-        self.summary_tabs.addTab(QLabel("F‑Wave summary content..."), "F‑Wave")
-        self.summary_tabs.setStyleSheet("""
-            QTabBar::tab { background: #f8fafc; padding: 6px 12px; margin-right: 2px; }
-            QTabBar::tab:selected { background: #e0f2fe; font-weight: 600; }
-        """)
-        layout.addWidget(self.summary_tabs)
-        layout.addSpacing(8)
+        # Summary tabs (final column) - REMOVED v0.2
+        # self.summary_tabs = QTabWidget()
+        # self.summary_tabs.addTab(QLabel("Motor summary content..."), "Motor")
+        # self.summary_tabs.addTab(QLabel("Sensory summary content..."), "Sensory")
+        # self.summary_tabs.addTab(QLabel("F‑Wave summary content..."), "F‑Wave")
+        # self.summary_tabs.setStyleSheet("""
+        #     QTabBar::tab { background: #f8fafc; padding: 6px 12px; margin-right: 2px; }
+        #     QTabBar::tab:selected { background: #e0f2fe; font-weight: 600; }
+        # """)
+        # layout.addWidget(self.summary_tabs)
+        # layout.addSpacing(8)
 
-        # Final Branding & Copyright Notice (Elegant Design)
+        # Final Branding & Copyright Notice (Smooth & Compact Design)
         copyright_container = QFrame()
         copyright_container.setStyleSheet("""
-            background-color: #f1f5f9;
-            border-top: 1px solid #e2e8f0;
-            border-radius: 8px;
-            margin-top: 4px;
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #dc2626, stop:1 #b91c1c);
+                border: none;
+                border-radius: 8px;
+                margin-top: 10px;
+            }
         """)
-        copy_layout = QVBoxLayout(copyright_container)
-        copy_layout.setContentsMargins(8, 10, 8, 10)
-        copy_layout.setSpacing(2)
+        
+        # Add subtle shadow for depth
+        copy_shadow = QGraphicsDropShadowEffect()
+        copy_shadow.setBlurRadius(8)
+        copy_shadow.setOffset(0, 2)
+        copy_shadow.setColor(QColor(0, 0, 0, 30))
+        copyright_container.setGraphicsEffect(copy_shadow)
 
-        copyright_footer = QLabel("© Lab Proteksi Radiasi")
-        copyright_footer.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; background: transparent;")
-        copyright_footer.setAlignment(Qt.AlignCenter)
+        copy_layout = QVBoxLayout(copyright_container)
+        copy_layout.setContentsMargins(10, 8, 10, 8)
+        copy_layout.setSpacing(3)
+
+        # Header with icon
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(5)
         
-        uni_label = QLabel("Universitas Brawijaya")
-        uni_label.setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: 600; background: transparent;")
-        uni_label.setAlignment(Qt.AlignCenter)
+        icon_label = QLabel("🏛️")
+        icon_label.setStyleSheet("font-size: 14px;")
+        header_layout.addWidget(icon_label)
         
-        copy_layout.addWidget(copyright_footer)
+        copyright_footer = QLabel("DEVELOPED BY")
+        copyright_footer.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 8px; font-weight: 700; letter-spacing: 1px; background: transparent;")
+        header_layout.addWidget(copyright_footer)
+        header_layout.addStretch()
+        
+        # Version badge inline
+        dev_label = QLabel("v0.2")
+        dev_label.setStyleSheet("""
+            color: #7f1d1d; 
+            font-size: 8px; 
+            font-weight: 700;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 2px 6px;
+            border-radius: 3px;
+        """)
+        header_layout.addWidget(dev_label)
+        
+        copy_layout.addLayout(header_layout)
+        
+        # Main institution name
+        uni_label = QLabel("Lab Proteksi Radiasi")
+        uni_label.setStyleSheet("color: white; font-size: 18px; font-weight: 800; margin-left: 19px; background: transparent;")
         copy_layout.addWidget(uni_label)
+        
+        # University name
+        ub_label = QLabel("Universitas Brawijaya")
+        ub_label.setStyleSheet("color: rgba(255, 255, 255, 0.9); font-size: 10px; font-weight: 600; margin-left: 19px; background: transparent;")
+        copy_layout.addWidget(ub_label)
+        
         layout.addWidget(copyright_container)
     
     def _get_menu_button_style(self):
@@ -822,28 +869,18 @@ class NeuroDiagMainWindow(QMainWindow):
         self.title_label = QLabel("Motor Nerve Conduction")
         self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #212529;")
         
-        # Action Buttons
-        btn_import = QPushButton("📂 Open Folder")
-        btn_import.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px;
-            }
-            QPushButton:hover { background-color: #5a6268; }
-        """)
-        btn_import.clicked.connect(self.open_patient_folder)
+        # Action Buttons - REMOVED v0.2
+        # btn_import = QPushButton("📂 Open Folder")
+        # btn_import.setStyleSheet("""...""")
+        # btn_import.clicked.connect(self.open_patient_folder)
 
-        btn_stimulate = QPushButton("▶ Jalankan Stimulasi")
-        btn_stimulate.setStyleSheet("""
-            QPushButton {
-                background-color: #0d6efd; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #0b5ed7; }
-        """)
+        # btn_stimulate = QPushButton("▶ Jalankan Stimulasi")
+        # btn_stimulate.setStyleSheet("""...""")
         
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
-        header_layout.addWidget(btn_import)
-        header_layout.addWidget(btn_stimulate)
+        # header_layout.addWidget(btn_import)
+        # header_layout.addWidget(btn_stimulate)
         layout.addLayout(header_layout)
 
         # Graph
@@ -1677,11 +1714,17 @@ if __name__ == '__main__':
     app.setFont(font)
 
     # Re-enabled Access Lock
-    lock = AccessLockDialog()
-    if lock.exec_() == QDialog.Accepted:
-        window = NeuroDiagMainWindow()
-        window.showMaximized()
-        sys.exit(app.exec_())
-    else:
-        sys.exit()
+    # Re-enabled Access Lock - DISABLED v0.2
+    # lock = AccessLockDialog()
+    # if lock.exec_() == QDialog.Accepted:
+    #     window = NeuroDiagMainWindow()
+    #     window.showMaximized()
+    #     sys.exit(app.exec_())
+    # else:
+    #     sys.exit()
+    
+    # Direct Launch
+    window = NeuroDiagMainWindow()
+    window.showMaximized()
+    sys.exit(app.exec_())
 
