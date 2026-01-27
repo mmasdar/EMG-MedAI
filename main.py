@@ -1713,18 +1713,12 @@ if __name__ == '__main__':
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    # Re-enabled Access Lock
-    # Re-enabled Access Lock - DISABLED v0.2
-    # lock = AccessLockDialog()
-    # if lock.exec_() == QDialog.Accepted:
-    #     window = NeuroDiagMainWindow()
-    #     window.showMaximized()
-    #     sys.exit(app.exec_())
-    # else:
-    #     sys.exit()
-    
-    # Direct Launch
-    window = NeuroDiagMainWindow()
-    window.showMaximized()
-    sys.exit(app.exec_())
+    # Access Lock Enabled
+    lock = AccessLockDialog()
+    if lock.exec_() == QDialog.Accepted:
+        window = NeuroDiagMainWindow()
+        window.showMaximized()
+        sys.exit(app.exec_())
+    else:
+        sys.exit()
 
